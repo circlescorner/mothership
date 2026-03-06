@@ -1,0 +1,19 @@
+app = "glondor-mothership"
+primary_region = "ord"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = true  # Key feature: Shuts down to 0 replicas
+  auto_start_machines = true # Key feature: Wakes up on traffic
+  min_machines_running = 0
+  
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 250        # Async Python scales well, high hard limit avoids crashing under load
+    soft_limit = 200        # Fly.io routes to new machines above soft limit
+
+[vm]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 1024          # 1GB easily runs standard Python slim containers
