@@ -224,10 +224,10 @@ async def _seed_defaults(db: aiosqlite.Connection):
     logger.info("Seeding default configuration...")
 
     # Default project
-    await db.execute(
-        "INSERT INTO projects (name, description, is_default, daily_budget, weekly_budget, monthly_budget) VALUES (?, ?, 1, 5.0, 25.0, 100.0)",
-        ("Default Project", "Main DevPlane project")
-    )
+    await db.execute("""
+        INSERT OR IGNORE INTO projects (id, name, description, daily_budget, weekly_budget, monthly_budget, is_default)
+        VALUES (1, 'Default Project', 'Main workspace', 4.0, 4.0, 4.0, 1)
+    """)
     project_id = (await (await db.execute("SELECT last_insert_rowid()")).fetchone())[0]
 
     # Default chain
