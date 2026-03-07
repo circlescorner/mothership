@@ -203,13 +203,46 @@ async function loadChains() {
 
         if (chains.length > 0) {
             const chain = await API.get(`/api/chains/${chains[0].id}`);
-            renderChainVis(chain.steps || []);
+
+            // Set toggle state based on DB
+            const isAgent = !chain.tournament_mode;
+            const toggle = document.getElementById('mode-toggle-agent');
+            if (toggle) toggle.checked = isAgent;
+
+            if (isAgent) {
+                const vis = document.getElementById('chain-vis');
+                if (vis) {
+                    vis.innerHTML = `
+                        <div class="chain-node" style="border-color:var(--accent)">
+                            <div class="node-icon">🧠</div>
+                            <div class="node-label">LangGraph Agent</div>
+                            <div class="node-model">Persistent</div>
+                        </div>
+                        <div class="chain-arrow">⇄</div>
+                        <div class="chain-node">
+                            <div class="node-icon">🛠️</div>
+                            <div class="node-label">Tools</div>
+                            <div class="node-model">System</div>
+                        </div>
+                    `;
+                }
+            } else {
+                renderChainVis(chain.steps || []);
+            }
 
             // Load tiers
             const projects = await API.get('/api/projects');
             if (projects.length > 0) {
                 const tiers = await API.get(`/api/chains/tiers/${projects[0].id}`);
                 renderTiers(tiers);
+
+                if (isAgent) {
+                    const tContainer = document.getElementById('tiers-container');
+                    if (tContainer) {
+                        tContainer.style.opacity = '0.3';
+                        tContainer.style.pointerEvents = 'none';
+                    }
+                }
             }
         }
     } catch (e) {
@@ -247,6 +280,47 @@ function renderTiers(tiers) {
             <div class="tier-model-row"><span class="role">Max Cost</span><span class="model">$${t.max_cost_per_run}</span></div>
         </div>
     `).join('');
+}
+
+async function toggleAgentMode(isAgent) {
+    // Agent Mode = tournament_mode: false
+    // Toggle affects the active project's active chain
+    try {
+        const projects = await API.get('/api/projects');
+        if (projects.length === 0) return;
+        const chainId = projects[0].active_chain_id;
+
+        await API.put(`/api/chains/${chainId}`, {
+            tournament_mode: !isAgent
+        });
+
+        // Update UI vis
+        const vis = document.getElementById('chain-vis');
+        if (isAgent) {
+            vis.innerHTML = `
+                <div class="chain-node" style="border-color:var(--accent)">
+                    <div class="node-icon">🧠</div>
+                    <div class="node-label">LangGraph Agent</div>
+                    <div class="node-model">Persistent</div>
+                </div>
+                <div class="chain-arrow">⇄</div>
+                <div class="chain-node">
+                    <div class="node-icon">🛠️</div>
+                    <div class="node-label">Tools</div>
+                    <div class="node-model">System</div>
+                </div>
+            `;
+            document.getElementById('tiers-container').style.opacity = '0.3';
+            document.getElementById('tiers-container').style.pointerEvents = 'none';
+        } else {
+            document.getElementById('tiers-container').style.opacity = '1';
+            document.getElementById('tiers-container').style.pointerEvents = 'auto';
+            loadChains(); // reload standard vis
+        }
+
+    } catch (e) {
+        console.error("Failed to toggle mode:", e);
+    }
 }
 
 // ─── Projects Page ──────────────────────────────────────────────────────────
@@ -476,7 +550,7 @@ async function runChain() {
     if (!prompt) return;
 
     const output = document.getElementById('run-output');
-    output.textContent = '🚀 Running chain tournament...';
+    output.textContent = '🚀 Initializing agent/chain...';
     output.classList.remove('has-content');
 
     // Reset chain visualization
@@ -485,16 +559,67 @@ async function runChain() {
     });
 
     try {
-        const result = await API.post('/api/chains/run', { prompt });
+        const response = await fetch('/api/chains/run/stream', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt })
+        });
 
-        if (result.status === 'success') {
-            output.textContent = `🏆 Winner: ${result.winning_tier?.toUpperCase() || 'N/A'}\nCost: $${(result.total_cost || 0).toFixed(4)}\n\n${result.final_output}`;
-            output.classList.add('has-content');
+        if (!response.ok) {
+            output.textContent = `❌ Error: ${response.statusText}`;
+            return;
+        }
 
-            // Mark all nodes complete
-            document.querySelectorAll('.chain-node').forEach(n => n.classList.add('complete'));
-        } else {
-            output.textContent = `❌ ${result.final_output || 'Chain execution failed'}`;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+
+        let finalContent = "";
+
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split('\n');
+
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const data = JSON.parse(line.substring(6));
+
+                    if (data.step === 'agent') {
+                        if (data.status === 'running') {
+                            output.textContent = `🧠 Agent Thinking... (${data.data.model})`;
+                        } else if (data.status === 'complete' && data.data.partial) {
+                            finalContent = data.data.partial + "...";
+                            output.textContent = `📝 Writing... \n\n${finalContent}`;
+                        }
+                    } else if (data.step === 'tools') {
+                        output.textContent = `🛠️ Using tools: ${data.data.tools.join(', ')}\n\n${finalContent}`;
+                    } else if (data.step === 'final') {
+                        const result = data.data;
+                        output.textContent = `🏆 Winner/Agent: ${result.winning_tier?.toUpperCase() || 'N/A'}\nCost: $${(result.total_cost || 0).toFixed(4)}\n\n${result.final_output}`;
+                        output.classList.add('has-content');
+                        document.querySelectorAll('.chain-node').forEach(n => n.classList.add('complete'));
+
+                        // Break early if we get the final response
+                        break;
+                    } else if (data.step !== 'heartbeat') {
+                        // Standard chain step updates
+                        const node = document.getElementById(`node-${data.step}`);
+                        if (node) {
+                            if (data.status === 'running') node.classList.add('running');
+                            if (data.status === 'complete') {
+                                node.classList.remove('running');
+                                node.classList.add('complete');
+                            }
+                            if (data.status === 'error') {
+                                node.classList.remove('running');
+                                node.classList.add('error');
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Refresh dashboard data

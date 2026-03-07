@@ -32,10 +32,22 @@ async def lifespan(app: FastAPI):
     from devplane.db import init_db
     from devplane.providers import load_all_keys_to_env
     from devplane.slack.bot import init_slack, slack_handler
+    from devplane.infra.mcp import get_mcp_manager
 
     await init_db()
     await load_all_keys_to_env()
     init_slack()
+
+    # Initialize trusted self-hosted MCPs
+    logger.info("Initializing MCP Connections...")
+    mcp_manager = get_mcp_manager()
+    # Connect official Python SQLite MCP Server to our DevPlane DB
+    # The command is "python", args "-m mcp_server_sqlite --db-path devplane.db"
+    await mcp_manager.connect_local_server(
+        name="devplane_db",
+        command="python",
+        args=["-m", "mcp_server_sqlite", "--db-path", "devplane.db"]
+    )
 
     if slack_handler:
         logger.info("Starting Slack Socket Mode Handler...")
@@ -48,9 +60,11 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"Slack handler error: {e}. Running Web-Only mode.")
             yield
+            await mcp_manager.cleanup()
     else:
         logger.warning("Slack tokens not configured. Running Web-Only mode.")
         yield
+        await mcp_manager.cleanup()
 
 
 # ─── App ──────────────────────────────────────────────────────────────────────

@@ -135,8 +135,20 @@
                 <!-- ════════════════════ CHAIN BUILDER ════════════════════ -->
                 <div class="page" id="page-chains">
                     <div class="card">
-                        <div class="card-header">
-                            <h3>🔗 Chain Pipeline</h3>
+                        <div class="card-header"
+                            style="display:flex; justify-content:space-between; align-items:center;">
+                            <h3>🔗 Pipeline Engine</h3>
+                            <div
+                                style="display:flex; gap:12px; align-items:center; background:var(--bg-elevated); padding:4px 12px; border-radius:20px;">
+                                <span style="font-size:13px; color:var(--text-dim)">Tournament</span>
+                                <label class="toggle">
+                                    <input type="checkbox" id="mode-toggle-agent"
+                                        onchange="toggleAgentMode(this.checked)">
+                                    <span class="slider"></span>
+                                </label>
+                                <span style="font-size:13px; font-weight:600; color:var(--accent)">Agent
+                                    (LangGraph)</span>
+                            </div>
                         </div>
                         <div class="chain-vis" id="chain-vis">
                             <div class="chain-node">
