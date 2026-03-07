@@ -16,3 +16,7 @@ ENV/
 
 # System
 .DS_Store
+
+# Database
+*.db
+devplane.db

@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mothership Initialization</title>
+    <!-- Modern Typography -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --glass-bg: rgba(30, 41, 59, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.1);
+            --accent-primary: #3b82f6;
+            --accent-glow: rgba(59, 130, 246, 0.5);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --success: #10b981;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-image:
+                radial-gradient(circle at 15% 50%, rgba(59, 130, 246, 0.15), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(139, 92, 246, 0.15), transparent 25%);
+            overflow: hidden;
+        }
+
+        /* Animated background particles effect */
+        .bg-grid {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-size: 50px 50px;
+            background-image: linear-gradient(to right, rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        .wizard-container {
+            position: relative;
+            z-index: 10;
+            width: 100%;
+            max-width: 600px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            padding: 40px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            transform: translateY(20px);
+            opacity: 0;
+            animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        @keyframes slideUp {
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .logo-icon {
+            font-size: 48px;
+            display: inline-block;
+            margin-bottom: 10px;
+            text-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
+            animation: float 4s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0% {
+                transform: translateY(0px);
+            }
+
+            50% {
+                transform: translateY(-10px);
+            }
+
+            100% {
+                transform: translateY(0px);
+            }
+        }
+
+        h1 {
+            font-size: 28px;
+            font-weight: 600;
+            background: linear-gradient(135deg, #fff, #94a3b8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 8px;
+        }
+
+        p.subtitle {
+            color: var(--text-muted);
+            font-size: 15px;
+        }
+
+        .step-indicator {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 40px;
+            position: relative;
+        }
+
+        .step-indicator::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--glass-border);
+            z-index: 1;
+            transform: translateY(-50%);
+        }
+
+        .step-dot {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: #1e293b;
+            border: 2px solid var(--glass-border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-muted);
+            z-index: 2;
+            transition: all 0.3s ease;
+        }
+
+        .step-dot.active {
+            background: var(--accent-primary);
+            border-color: var(--accent-primary);
+            color: white;
+            box-shadow: 0 0 15px var(--accent-glow);
+        }
+
+        .step-dot.completed {
+            background: var(--success);
+            border-color: var(--success);
+            color: white;
+        }
+
+        .form-step {
+            display: none;
+            animation: fadeIn 0.4s ease;
+        }
+
+        .form-step.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateX(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .input-group {
+            margin-bottom: 24px;
+            position: relative;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: var(--text-muted);
+            font-weight: 400;
+        }
+
+        input {
+            width: 100%;
+            padding: 16px;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--glass-border);
+            border-radius: 12px;
+            color: white;
+            font-family: inherit;
+            font-size: 15px;
+            transition: all 0.3s ease;
+            outline: none;
+        }
+
+        input:focus {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+            background: rgba(0, 0, 0, 0.4);
+        }
+
+        input::placeholder {
+            color: rgba(148, 163, 184, 0.3);
+        }
+
+        .navigation {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 40px;
+        }
+
+        button {
+            padding: 12px 28px;
+            border-radius: 12px;
+            font-family: inherit;
+            font-weight: 600;
+            font-size: 15px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: none;
+            outline: none;
+        }
+
+        .btn-prev {
+            background: transparent;
+            color: var(--text-muted);
+            border: 1px solid var(--glass-border);
+        }
+
+        .btn-prev:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: white;
+        }
+
+        .btn-next {
+            background: var(--accent-primary);
+            color: white;
+            box-shadow: 0 4px 15px var(--accent-glow);
+            margin-left: auto;
+            /* Push to right if no prev button */
+        }
+
+        .btn-next:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px var(--accent-glow);
+            background: #2563eb;
+        }
+
+        .btn-submit {
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
+            box-shadow: 0 4px 15px rgba(16, 185, 129, 0.4);
+            margin-left: auto;
+        }
+
+        .btn-submit:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        /* Loading Overlay */
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--glass-bg);
+            backdrop-filter: blur(10px);
+            border-radius: 24px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        .loading-overlay.active {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-left-color: var(--accent-primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        .success-message {
+            text-align: center;
+            display: none;
+        }
+
+        .success-message.active {
+            display: block;
+            animation: scaleIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        @keyframes scaleIn {
+            0% {
+                transform: scale(0.8);
+                opacity: 0;
+            }
+
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        .check-icon {
+            width: 80px;
+            height: 80px;
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+            margin: 0 auto 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="bg-grid"></div>
+
+    <div class="wizard-container">
+        <!-- Loading / Success Screen -->
+        <div class="loading-overlay" id="loadingOverlay">
+            <div class="spinner" id="spinner"></div>
+            <p id="loadingText" style="color: var(--text-main); font-weight: 500;">Initializing Mothership
+                Environment...</p>
+
+            <div class="success-message" id="successMessage">
+                <div class="check-icon">✓</div>
+                <h2>Systems Online</h2>
+                <p style="color: var(--text-muted); margin-top: 10px;">The environment has been configured.<br>Rebooting
+                    API server automatically...</p>
+            </div>
+        </div>
+
+        <div class="header">
+            <div class="logo-icon">🛰️</div>
+            <h1>Mothership Setup</h1>
+            <p class="subtitle">Complete the 3-step initialization sequence to securely deploy your cloud-native
+                platform.</p>
+        </div>
+
+        <div class="step-indicator">
+            <div class="step-dot active" data-step="1">1</div>
+            <div class="step-dot" data-step="2">2</div>
+            <div class="step-dot" data-step="3">3</div>
+        </div>
+
+        <form id="setupForm">
+            <!-- Step 1: Slack Tokens -->
+            <div class="form-step active" id="step1">
+                <div class="input-group">
+                    <label for="SLACK_BOT_TOKEN">Slack Bot Token (xoxb)</label>
+                    <input type="password" id="SLACK_BOT_TOKEN" name="SLACK_BOT_TOKEN"
+                        placeholder="xoxb-xxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxx" required>
+                </div>
+                <div class="input-group">
+                    <label for="SLACK_APP_TOKEN">Slack App Token (xapp)</label>
+                    <input type="password" id="SLACK_APP_TOKEN" name="SLACK_APP_TOKEN"
+                        placeholder="xapp-1-xxxxxxxxx-xxxxxxxxxx-xxxxxxxxxxxxxxxx" required>
+                </div>
+            </div>
+
+            <!-- Step 2: AI Provider Keys -->
+            <div class="form-step" id="step2">
+                <div class="input-group">
+                    <label for="TOGETHERAI_API_KEY">TogetherAI API Key (For Logic Strategy)</label>
+                    <input type="password" id="TOGETHERAI_API_KEY" name="TOGETHERAI_API_KEY"
+                        placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+                </div>
+                <div class="input-group">
+                    <label for="GROQ_API_KEY">Groq API Key (For Speed Stacks)</label>
+                    <input type="password" id="GROQ_API_KEY" name="GROQ_API_KEY"
+                        placeholder="gsk_xxxxxxxxxxxxxxxxxxxxx">
+                </div>
+                <div class="input-group">
+                    <label for="DEEPSEEK_API_KEY">DeepSeek API Key (For Logic Strategy + Judge)</label>
+                    <input type="password" id="DEEPSEEK_API_KEY" name="DEEPSEEK_API_KEY"
+                        placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+                </div>
+                <div class="input-group">
+                    <label for="CEREBRAS_API_KEY">Cerebras API Key (For Fast LLaMA 4 Inference)</label>
+                    <input type="password" id="CEREBRAS_API_KEY" name="CEREBRAS_API_KEY"
+                        placeholder="csk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx">
+                </div>
+                <div class="input-group">
+                    <label for="OPENROUTER_API_KEY">OpenRouter API Key (For Creative Stack — Claude, GPT-4o)</label>
+                    <input type="password" id="OPENROUTER_API_KEY" name="OPENROUTER_API_KEY"
+                        placeholder="sk-or-v1-xxxxxxxxxxxxxxxxxxxxxxxx">
+                </div>
+                <div class="input-group">
+                    <label for="GEMINI_API_KEY">Google Gemini API Key (For Google Stack — Free Credits)</label>
+                    <input type="password" id="GEMINI_API_KEY" name="GEMINI_API_KEY"
+                        placeholder="AIzaSyxxxxxxxxxxxxxxxxxxxxxxxxx">
+                </div>
+                <div class="input-group">
+                    <label for="FIREWORKS_AI_API_KEY">Fireworks AI API Key (For Blitz Stack)</label>
+                    <input type="password" id="FIREWORKS_AI_API_KEY" name="FIREWORKS_AI_API_KEY"
+                        placeholder="fw_xxxxxxxxxxxxxxxxxxxxx">
+                </div>
+            </div>
+
+            <!-- Step 3: Vector DB & Cloud -->
+            <div class="form-step" id="step3">
+                <div class="input-group">
+                    <label for="QDRANT_URL">Qdrant Cluster URL</label>
+                    <input type="url" id="QDRANT_URL" name="QDRANT_URL"
+                        placeholder="https://xxx-xxx.aws.cloud.qdrant.io:6333" required>
+                </div>
+                <div class="input-group">
+                    <label for="QDRANT_KEY">Qdrant API Key</label>
+                    <input type="password" id="QDRANT_KEY" name="QDRANT_KEY" placeholder="xxxxxxxxxxxx-xxxxxxxxxxxx"
+                        required>
+                </div>
+                <!-- DevPlane v2 Cloud Infra -->
+                <div class="input-group"
+                    style="margin-top:32px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 24px;">
+                    <label for="DIGITALOCEAN_TOKEN">DigitalOcean Token (Optional — For Cloud VMs/Workspaces)</label>
+                    <input type="password" id="DIGITALOCEAN_TOKEN" name="DIGITALOCEAN_TOKEN"
+                        placeholder="dop_v1_xxxxxxxxxxxxxxxxxxxxxxxx">
+                </div>
+            </div>
+
+            <div class="navigation">
+                <button type="button" class="btn-prev hidden" id="btnPrev">Back</button>
+                <button type="button" class="btn-next" id="btnNext">Continue</button>
+                <button type="submit" class="btn-submit hidden" id="btnSubmit">Engage Thrusters</button>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        const form = document.getElementById('setupForm');
+        const steps = document.querySelectorAll('.form-step');
+        const dots = document.querySelectorAll('.step-dot');
+        const btnPrev = document.getElementById('btnPrev');
+        const btnNext = document.getElementById('btnNext');
+        const btnSubmit = document.getElementById('btnSubmit');
+
+        let currentStep = 0;
+
+        function updateUI() {
+            // Update steps visibility
+            steps.forEach((step, index) => {
+                step.classList.toggle('active', index === currentStep);
+            });
+
+            // Update dots
+            dots.forEach((dot, index) => {
+                dot.classList.toggle('active', index === currentStep);
+                dot.classList.toggle('completed', index < currentStep);
+            });
+
+            // Update buttons
+            if (currentStep === 0) {
+                btnPrev.classList.add('hidden');
+            } else {
+                btnPrev.classList.remove('hidden');
+            }
+
+            if (currentStep === steps.length - 1) {
+                btnNext.classList.add('hidden');
+                btnSubmit.classList.remove('hidden');
+            } else {
+                btnNext.classList.remove('hidden');
+                btnSubmit.classList.add('hidden');
+            }
+
+            // Focus first input of current step
+            const firstInput = steps[currentStep].querySelector('input');
+            if (firstInput) firstInput.focus();
+        }
+
+        function validateStep() {
+            const inputs = steps[currentStep].querySelectorAll('input[required]');
+            let isValid = true;
+            inputs.forEach(input => {
+                if (!input.value.trim()) {
+                    isValid = false;
+                    input.style.borderColor = '#ef4444'; // Red flash
+                    setTimeout(() => input.style.borderColor = '', 1000);
+                }
+            });
+            return isValid;
+        }
+
+        btnNext.addEventListener('click', () => {
+            if (validateStep() && currentStep < steps.length - 1) {
+                currentStep++;
+                updateUI();
+            }
+        });
+
+        btnPrev.addEventListener('click', () => {
+            if (currentStep > 0) {
+                currentStep--;
+                updateUI();
+            }
+        });
+
+        // Enter key to proceed
+        form.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                if (currentStep < steps.length - 1) {
+                    btnNext.click();
+                } else if (currentStep === steps.length - 1) {
+                    btnSubmit.click();
+                }
+            }
+        });
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            if (!validateStep()) return;
+
+            // Gather data
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+
+            // Show loading UI
+            const overlay = document.getElementById('loadingOverlay');
+            overlay.classList.add('active');
+
+            try {
+                // Submit to backend
+                const response = await fetch('/api/setup', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data),
+                });
+
+                if (response.ok) {
+                    // Show success
+                    document.getElementById('spinner').style.display = 'none';
+                    document.getElementById('loadingText').style.display = 'none';
+                    document.getElementById('successMessage').classList.add('active');
+
+                    // Reload after a delay (server will reboot)
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 4000);
+                } else {
+                    throw new Error('Server rejected configuration');
+                }
+            } catch (error) {
+                alert('Setup Failed: ' + error.message);
+                overlay.classList.remove('active');
+            }
+        });
+    </script>
+</body>
+
+</html>
