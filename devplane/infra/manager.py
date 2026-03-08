@@ -12,8 +12,9 @@ import httpx
 from datetime import datetime, timedelta
 from typing import Optional
 from devplane.db import get_db
+from devplane.secrets_mgr import get_vault
 
-logger = logging.getLogger("devplane.infra")
+logger = logging.getLogger("devplane.infra.manager")
 
 # ─── Droplet Size Catalog ────────────────────────────────────────────────────
 
@@ -74,7 +75,7 @@ class InfraManager:
     async def _api(self, method: str, endpoint: str, data: dict = None) -> dict:
         """Make DigitalOcean API request."""
         if not self.token:
-            return {"error": "DIGITALOCEAN_TOKEN not configured"}
+            return {"error": "DIGITALOCEAN_TOKEN not configured", "code": "NOT_CONFIGURED"}
 
         if self._client is None:
             self._client = httpx.AsyncClient(
@@ -98,16 +99,44 @@ class InfraManager:
 
             if resp.status_code == 204:
                 return {"status": "ok"}
+            
+            # Check for error responses
+            if resp.status_code >= 400:
+                error_data = resp.json() if resp.text else {}
+                return {
+                    "error": error_data.get("message", f"API error {resp.status_code}"),
+                    "code": error_data.get("id", f"HTTP_{resp.status_code}"),
+                    "status_code": resp.status_code
+                }
+            
             return resp.json()
+        except httpx.TimeoutException:
+            logger.error(f"DO API timeout: {endpoint}")
+            return {"error": "Request timed out", "code": "TIMEOUT"}
+        except httpx.ConnectError as e:
+            logger.error(f"DO API connection error: {e}")
+            return {"error": "Failed to connect to DigitalOcean API", "code": "CONNECTION_ERROR"}
         except Exception as e:
             logger.error(f"DO API error: {e}")
-            return {"error": str(e)}
+            return {"error": str(e), "code": "UNKNOWN_ERROR"}
 
     # ─── Droplet Operations ───────────────────────────────────────────────
 
     async def list_droplets(self) -> list[dict]:
         """List all DevPlane-managed droplets."""
         result = await self._api("GET", "/droplets?tag_name=devplane")
+        
+        # Handle API errors
+        if "error" in result:
+            logger.error(f"Failed to list droplets: {result.get('error')}")
+            # Return cached data from DB as fallback
+            db = await get_db()
+            try:
+                rows = await db.execute("SELECT * FROM droplets WHERE status NOT IN ('destroyed', 'error') ORDER BY created_at DESC")
+                return [dict(r) for r in await rows.fetchall()]
+            finally:
+                await db.close()
+        
         droplets = result.get("droplets", [])
 
         # Also sync with local DB
@@ -115,11 +144,30 @@ class InfraManager:
         try:
             for d in droplets:
                 await db.execute("""
-                    INSERT OR REPLACE INTO droplets (droplet_id, name, size, region, status, public_ip, vpc_ip)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO droplets (droplet_id, name, size, image, region, status, droplet_type, cost_per_hour, tags, ttl_minutes, expires_at, public_ip, vpc_ip)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(droplet_id) DO UPDATE SET
+                        name = excluded.name,
+                        size = excluded.size,
+                        image = excluded.image,
+                        region = excluded.region,
+                        status = excluded.status,
+                        public_ip = excluded.public_ip,
+                        vpc_ip = excluded.vpc_ip,
+                        tags = excluded.tags,
+                        cost_per_hour = excluded.cost_per_hour
                 """, (
-                    d["id"], d["name"], d["size"]["slug"], d["region"]["slug"],
+                    d["id"],
+                    d["name"],
+                    d["size"]["slug"],
+                    d["image"]["slug"],
+                    d["region"]["slug"],
                     d["status"],
+                    "worker" if "worker" in d.get("tags", []) else "kasm" if "kasm" in d.get("tags", []) else "gpu" if "gpu" in d.get("tags", []) else "deploy",
+                    DROPLET_SIZES.get(d["size"]["slug"], {}).get("price_hourly", 0),
+                    json.dumps(d.get("tags", [])),
+                    0,
+                    None,
                     d["networks"]["v4"][0]["ip_address"] if d.get("networks", {}).get("v4") else None,
                     d["networks"]["v4"][-1]["ip_address"] if len(d.get("networks", {}).get("v4", [])) > 1 else None,
                 ))
@@ -129,12 +177,42 @@ class InfraManager:
 
         return droplets
 
+    async def get_droplet(self, droplet_id: int) -> dict:
+        """Get a specific droplet by ID."""
+        result = await self._api("GET", f"/droplets/{droplet_id}")
+        
+        if "error" in result:
+            return result
+            
+        droplet = result.get("droplet", {})
+        if droplet:
+            return {
+                "droplet_id": droplet["id"],
+                "name": droplet["name"],
+                "size": droplet["size"]["slug"],
+                "region": droplet["region"]["slug"],
+                "status": droplet["status"],
+                "public_ip": droplet["networks"]["v4"][0]["ip_address"] if droplet.get("networks", {}).get("v4") else None,
+                "private_ip": droplet["networks"]["v4"][-1]["ip_address"] if len(droplet.get("networks", {}).get("v4", [])) > 1 else None,
+                "created_at": droplet.get("created_at"),
+                "tags": droplet.get("tags", []),
+            }
+        return {"error": "Droplet not found", "code": "NOT_FOUND"}
+
     async def create_droplet(self, name: str, size: str = "s-2vcpu-4gb",
                               image: str = "ubuntu-22-04-x64",
                               droplet_type: str = "worker",
                               ttl_minutes: int = 0,
                               user_data: str = "") -> dict:
         """Create a new droplet."""
+        # Validate size against catalog
+        if size not in DROPLET_SIZES:
+            available_sizes = list(DROPLET_SIZES.keys())
+            return {
+                "error": f"Invalid size '{size}'. Available sizes: {available_sizes}",
+                "code": "INVALID_SIZE"
+            }
+
         if not user_data:
             user_data = self._generate_user_data(name, droplet_type, ttl_minutes)
 
@@ -153,6 +231,12 @@ class InfraManager:
             config["ssh_keys"] = [int(self.ssh_key_id)]
 
         result = await self._api("POST", "/droplets", config)
+        
+        # Check for API errors
+        if "error" in result:
+            logger.error(f"Failed to create droplet: {result.get('error')}")
+            return result
+
         droplet = result.get("droplet", {})
 
         if droplet.get("id"):
@@ -165,10 +249,10 @@ class InfraManager:
             db = await get_db()
             try:
                 await db.execute("""
-                    INSERT INTO droplets (droplet_id, name, size, region, status, droplet_type, cost_per_hour, ttl_minutes, expires_at, tags)
-                    VALUES (?, ?, ?, ?, 'creating', ?, ?, ?, ?, ?)
+                    INSERT INTO droplets (droplet_id, name, size, image, region, status, droplet_type, cost_per_hour, ttl_minutes, expires_at, tags, public_ip, vpc_ip)
+                    VALUES (?, ?, ?, ?, ?, 'creating', ?, ?, ?, ?, ?, NULL, NULL)
                 """, (
-                    droplet["id"], name, size, self.region, droplet_type,
+                    droplet["id"], name, size, image, self.region, droplet_type,
                     size_info.get("price_hourly", 0), ttl_minutes, expires,
                     json.dumps(["devplane", droplet_type])
                 ))
@@ -177,7 +261,62 @@ class InfraManager:
                 await db.close()
 
             logger.info(f"Created droplet: {name} ({size}) — ID {droplet['id']}")
+            
+            # Return success with droplet details
+            return {
+                "status": "created",
+                "droplet_id": droplet["id"],
+                "name": name,
+                "size": size,
+                "region": self.region,
+                "type": droplet_type,
+                "ip": droplet.get("networks", {}).get("v4", [{}])[0].get("ip_address") if droplet.get("networks") else None,
+            }
 
+        return result
+
+    async def restore_from_snapshot(self, snapshot_id: int, name: str, size: str = "s-2vcpu-4gb") -> dict:
+        """Create a new droplet exact copy from an image snapshot."""
+        if size not in DROPLET_SIZES:
+            return {"error": f"Invalid size '{size}'", "code": "INVALID_SIZE"}
+            
+        config = {
+            "name": name,
+            "region": self.region,
+            "size": size,
+            "image": snapshot_id,
+            "tags": ["devplane", "restored"],
+        }
+        
+        if self.vpc_id:
+            config["vpc_uuid"] = self.vpc_id
+        if self.ssh_key_id:
+            config["ssh_keys"] = [int(self.ssh_key_id)]
+            
+        result = await self._api("POST", "/droplets", config)
+        if "error" in result:
+            return result
+            
+        droplet = result.get("droplet", {})
+        if droplet.get("id"):
+            db = await get_db()
+            try:
+                await db.execute("""
+                    INSERT INTO droplets (droplet_id, name, size, image, region, status, droplet_type, cost_per_hour, tags)
+                    VALUES (?, ?, ?, ?, ?, 'creating', 'restored', ?, ?)
+                """, (
+                    droplet["id"], name, size, str(snapshot_id), self.region,
+                    DROPLET_SIZES[size]["price_hourly"], json.dumps(["devplane", "restored"])
+                ))
+                await db.commit()
+            finally:
+                await db.close()
+                
+            return {
+                "status": "restoring",
+                "droplet_id": droplet["id"],
+                "name": name
+            }
         return result
 
     async def destroy_droplet(self, droplet_id: int) -> dict:
@@ -197,41 +336,107 @@ class InfraManager:
         logger.info(f"Destroyed droplet: {droplet_id}")
         return result
 
+    # ─── Snapshot Operations ──────────────────────────────────────────────
+
+    async def snapshot_droplet(self, droplet_id: int, snapshot_name: str) -> dict:
+        """Power off and take a snapshot of a droplet."""
+        # 1. Power off
+        power_off_req = {
+            "type": "power_off"
+        }
+        await self._api("POST", f"/droplets/{droplet_id}/actions", power_off_req)
+        
+        # In a real app we'd poll for power-off completion, but often the DO API 
+        # queues the snapshot action automatically after power off.
+        
+        # 2. Snapshot
+        snapshot_req = {
+            "type": "snapshot",
+            "name": snapshot_name
+        }
+        result = await self._api("POST", f"/droplets/{droplet_id}/actions", snapshot_req)
+        
+        if "error" not in result:
+            logger.info(f"Initiated snapshot '{snapshot_name}' for droplet {droplet_id}")
+            return {"status": "snapshotting", "action": result.get("action", {})}
+        return result
+
+    async def get_snapshots(self) -> list[dict]:
+        """List all available DevPlane snapshots."""
+        result = await self._api("GET", "/snapshots?resource_type=droplet")
+        if "error" in result:
+            return result
+            
+        # Filter for our snapshots (could check tags or name prefix)
+        snapshots = result.get("snapshots", [])
+        return [s for s in snapshots if s["name"].startswith("devplane-")]
+
     async def create_worker(self, ttl_minutes: int = 30,
                              size: str = "s-2vcpu-4gb") -> dict:
-        """Create an ephemeral worker with auto-expiry."""
-        worker_id = f"w{secrets.token_hex(4)}"
-        name = f"devplane-worker-{worker_id}"
-
-        dynamic_secret = secrets.token_urlsafe(32)
-        expires = (datetime.utcnow() + timedelta(minutes=ttl_minutes)).isoformat()
+        name = f"devplane-worker-{secrets.token_hex(4)}"
+        
+        # 1. Generate dynamic secret via Vault
+        vault = get_vault()
+        secret_data = await vault.generate_ephemeral_secret(name, ttl_minutes)
+        dynamic_secret = secret_data["secret_value"]
+        expires_at = secret_data["expires_at"]
 
         user_data = f"""#!/bin/bash
 set -e
+
 export DEBIAN_FRONTEND=noninteractive
+export APT_LISTCHANGES_FRONTEND=none
 
-apt-get update && apt-get upgrade -y
-curl -fsSL https://get.docker.com | sh
-usermod -aG docker root
-systemctl enable docker
+# Timeout Safe Aliases
+alias curl='curl --max-time 30 --connect-timeout 10'
+alias wget='wget --timeout=30 --tries=3'
 
-mkdir -p /etc/devplane /srv/devplane/worker
+# System update
+timeout 300 apt-get update
+timeout 600 apt-get upgrade -y
+
+# Create directories
+mkdir -p /etc/devplane
+mkdir -p /srv/devplane/worker
+mkdir -p /var/log/devplane
+
+# Inject dynamic secret safely
 echo "{dynamic_secret}" > /etc/devplane/secret
-echo "{expires}" > /etc/devplane/secret_expires
-echo "{worker_id}" > /etc/devplane/worker_id
-chmod 600 /etc/devplane/secret
+echo "{expires_at}" > /etc/devplane/secret_expires
+echo "{name}" > /etc/devplane/worker_id
+chmod 600 /etc/devplane/secret /etc/devplane/secret_expires
 
-# Auto-destroy cron
-echo "*/5 * * * * root python3 -c \\"
-import datetime
-exp = datetime.datetime.fromisoformat(open('/etc/devplane/secret_expires').read().strip())
-if datetime.datetime.utcnow() > exp:
-    import subprocess
-    subprocess.run(['shutdown', '-h', 'now'])
-\\"" > /etc/cron.d/devplane-expire
+# Create secret expiration checker script
+cat > /usr/local/bin/check-secret-expiration.sh << 'SCRIPT'
+#!/bin/bash
+SECRET_FILE="/etc/devplane/secret"
+EXPIRES_FILE="/etc/devplane/secret_expires"
+LOG_FILE="/var/log/devplane-secrets.log"
+
+log() {{
+    echo "\\$(date -Iseconds) - \\$1" >> "\\$LOG_FILE"
+}}
+
+if [[ ! -f "\\$SECRET_FILE" ]] || [[ ! -f "\\$EXPIRES_FILE" ]]; then
+    exit 0
+fi
+
+EXPIRES_AT=\\$(cat "\\$EXPIRES_FILE")
+CURRENT_TIME=\\$(date -u +%Y-%m-%dT%H:%M:%S)
+
+if [[ "\\$CURRENT_TIME" > "\\$EXPIRES_AT" ]]; then
+    log "ERROR: Secret EXPIRED. Shutting down worker..."
+    shred -u "\\$SECRET_FILE" 2>/dev/null || rm -f "\\$SECRET_FILE"
+    shutdown -h now
+fi
+SCRIPT
+chmod +x /usr/local/bin/check-secret-expiration.sh
+
+# Setup cron for secret expiration checking
+echo "*/2 * * * * root /usr/local/bin/check-secret-expiration.sh" > /etc/cron.d/devplane-secrets
 
 hostnamectl set-hostname {name}
-echo "Worker {worker_id} ready — expires at {expires}"
+echo "DevPlane worker {name} ready with dynamic secret"
 """
 
         return await self.create_droplet(name, size, "ubuntu-22-04-x64", "worker", ttl_minutes, user_data)

@@ -115,9 +115,9 @@ async def test_provider_connection(provider_id: int) -> dict:
         "cerebras": "cerebras/llama3.3-70b",
         "deepseek": "deepseek/deepseek-chat",
         "gemini": "gemini/gemini-2.0-flash",
-        "openrouter": "openrouter/openai/gpt-4o-mini",
+        "openrouter": "openrouter/anthropic/claude-sonnet-4",
         "fireworks_ai": "fireworks_ai/accounts/fireworks/models/llama-v3p1-8b-instruct",
-        "togetherai": "together_ai/meta-llama/Llama-3-8b-chat-hf",
+        "togetherai": "together_ai/Qwen/Qwen2.5-Coder-32B-Instruct",
         "openai": "openai/gpt-4o-mini",
     }
     model = test_models.get(prov["name"], f"{prov['name']}/test")
@@ -158,6 +158,7 @@ def _set_env_key(provider_name: str, api_key: str):
         "gemini": "GEMINI_API_KEY",
         "fireworks_ai": "FIREWORKS_AI_API_KEY",
         "togetherai": "TOGETHERAI_API_KEY",
+        "together_ai": "TOGETHERAI_API_KEY",
         "openai": "OPENAI_API_KEY",
     }
     env_var = env_map.get(provider_name)

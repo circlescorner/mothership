@@ -213,9 +213,116 @@ CREATE TABLE IF NOT EXISTS model_performance (
     last_used TEXT DEFAULT (datetime('now'))
 );
 
+-- Role-based model registry (5-way fallback per role)
+CREATE TABLE IF NOT EXISTS role_models (
+    role TEXT PRIMARY KEY,
+    models_json TEXT NOT NULL DEFAULT '[]',
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- GPU compute jobs (Vast.ai, RunPod, Modal, Lambda, DO)
+CREATE TABLE IF NOT EXISTS gpu_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT UNIQUE,
+    provider TEXT NOT NULL DEFAULT 'digitalocean',
+    script_hash TEXT,
+    status TEXT DEFAULT 'pending',
+    gpu_type TEXT DEFAULT '',
+    cost_per_hour REAL DEFAULT 0.0,
+    total_cost REAL DEFAULT 0.0,
+    metadata_json TEXT DEFAULT '{}',
+    created_at TEXT DEFAULT (datetime('now')),
+    completed_at TEXT
+);
+
+-- Visual Workflow Orchestration
+CREATE TABLE IF NOT EXISTS workflows (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    nodes TEXT NOT NULL DEFAULT '[]',
+    edges TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now')),
+    is_active INTEGER DEFAULT 1,
+    config TEXT DEFAULT '{}'
+);
+
+-- User Profiles for Personal Agent
+CREATE TABLE IF NOT EXISTS user_profiles (
+    user_id TEXT PRIMARY KEY,
+    data TEXT NOT NULL,
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Token Cache Persistence
+CREATE TABLE IF NOT EXISTS token_cache (
+    key TEXT PRIMARY KEY,
+    response TEXT NOT NULL,
+    model TEXT,
+    tokens_saved INTEGER DEFAULT 0,
+    cost_saved REAL DEFAULT 0.0,
+    created_at TEXT DEFAULT (datetime('now')),
+    expires_at TEXT
+);
+
+-- Agent Swarm Executions
+CREATE TABLE IF NOT EXISTS swarm_executions (
+    id TEXT PRIMARY KEY,
+    swarm_name TEXT,
+    consensus_type TEXT,
+    final_output TEXT,
+    individual_responses TEXT,
+    execution_time_ms REAL,
+    total_tokens INTEGER,
+    total_cost_usd REAL,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- ═══ MCP Agent Registry & Cross-IDE Queue ═══
+
+-- Registered external agents (Kilo Code, Cursor, etc.)
+CREATE TABLE IF NOT EXISTS agent_workflows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ide_name TEXT NOT NULL,
+    agent_name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    input_schema TEXT DEFAULT '{}',
+    is_active INTEGER DEFAULT 1,
+    last_ping TEXT DEFAULT (datetime('now')),
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Cross-IDE Task Queue (Antigravity -> Kilo Code)
+CREATE TABLE IF NOT EXISTS devplane_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent_name TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    result_json TEXT,
+    error_message TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    completed_at TEXT
+);
+
+-- ═══ Secrets Manager (Vault) ═══
+
+-- Ephemeral, encrypted secrets
+CREATE TABLE IF NOT EXISTS devplane_secrets (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    encrypted_value TEXT NOT NULL,
+    expires_at TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project_id);
 CREATE INDEX IF NOT EXISTS idx_droplets_status ON droplets(status);
 CREATE INDEX IF NOT EXISTS idx_model_perf_slug ON model_performance(model_slug);
+CREATE INDEX IF NOT EXISTS idx_gpu_jobs_status ON gpu_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_workflows_active ON workflows(is_active);
+CREATE INDEX IF NOT EXISTS idx_token_cache_expires ON token_cache(expires_at);
+CREATE INDEX IF NOT EXISTS idx_devplane_tasks_status ON devplane_tasks(status);
 """
 
 

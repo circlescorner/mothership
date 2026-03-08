@@ -5,6 +5,7 @@ Qdrant (embeddings) for semantic retrieval. Memory improves
 response quality over time by injecting relevant past context.
 """
 
+import asyncio
 import json
 import logging
 import hashlib
@@ -18,16 +19,51 @@ logger = logging.getLogger("devplane.memory")
 
 EMBED_MODEL = "gemini/text-embedding-004"  # Free tier
 EMBED_DIM = 768
+EMBED_TIMEOUT = 10.0  # Timeout in seconds for embedding API calls
 
 
 async def embed_text(text: str) -> list[float]:
-    """Generate embedding vector for text using LiteLLM."""
+    """Generate embedding vector for text using LiteLLM with timeout protection.
+    
+    Args:
+        text: Text to embed
+        
+    Returns:
+        Embedding vector as list of floats
+        
+    Note:
+        Falls back to hash-based embedding if API call fails or times out.
+        This prevents terminals from getting stuck on slow/unresponsive APIs.
+    """
     try:
         from litellm import aembedding
-        response = await aembedding(model=EMBED_MODEL, input=[text])
-        return response.data[0]["embedding"]
+        
+        # Create embedding task with timeout to prevent hanging
+        response = await asyncio.wait_for(
+            aembedding(model=EMBED_MODEL, input=[text]),
+            timeout=EMBED_TIMEOUT
+        )
+        
+        # Validate response structure
+        if not response or not hasattr(response, 'data') or not response.data:
+            logger.warning("Empty or invalid embedding response, using fallback")
+            return _hash_embed(text)
+            
+        embedding_data = response.data[0]
+        if isinstance(embedding_data, dict) and "embedding" in embedding_data:
+            return embedding_data["embedding"]
+        else:
+            logger.warning(f"Unexpected embedding response format: {type(embedding_data)}")
+            return _hash_embed(text)
+            
+    except asyncio.TimeoutError:
+        logger.warning(f"Embedding API timed out after {EMBED_TIMEOUT}s, using fallback")
+        return _hash_embed(text)
+    except ImportError as e:
+        logger.warning(f"LiteLLM not available: {e}, using fallback")
+        return _hash_embed(text)
     except Exception as e:
-        logger.warning(f"Embedding failed (falling back to hash): {e}")
+        logger.warning(f"Embedding failed (falling back to hash): {type(e).__name__}: {e}")
         # Fallback: simple hash-based pseudo-embedding for when API is unavailable
         return _hash_embed(text)
 
@@ -35,7 +71,10 @@ async def embed_text(text: str) -> list[float]:
 def _hash_embed(text: str) -> list[float]:
     """Deterministic pseudo-embedding from text hash. Used as fallback."""
     import struct
-    h = hashlib.sha256(text.encode()).digest() * (EMBED_DIM // 32 + 1)
+    # SHA256 digest is 32 bytes, we need EMBED_DIM * 4 bytes total
+    digest = hashlib.sha256(text.encode()).digest()
+    repeats = (EMBED_DIM * 4 + len(digest) - 1) // len(digest)  # ceil division
+    h = digest * repeats  # repeat enough to cover required bytes
     floats = [struct.unpack('f', h[i:i+4])[0] % 1.0 for i in range(0, EMBED_DIM * 4, 4)]
     return floats[:EMBED_DIM]
 

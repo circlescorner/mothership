@@ -1,0 +1,52 @@
+﻿INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+2026-03-07 18:37:14,661 - devplane.db - INFO - Database initialized at /app/devplane.db
+2026-03-07 18:37:14,665 - devplane.security - INFO - Audit tables initialized
+2026-03-07 18:37:14,668 - devplane.auth - INFO - Auth tables initialized
+2026-03-07 18:37:14,672 - devplane.providers - INFO - Loaded all provider API keys into environment
+2026-03-07 18:37:14,829 - devplane.slack - INFO - Slack bot initialized
+2026-03-07 18:37:14,835 - devplane - INFO - Role-based model registry loaded
+2026-03-07 18:37:14,835 - devplane - INFO - Initializing MCP Connections...
+/usr/local/bin/python3.11: No module named mcp_server_sqlite
+2026-03-07 18:37:15,507 - devplane.infra.mcp - ERROR - Failed to connect to MCP Server devplane_db: Connection closed
+2026-03-07 18:37:15,508 - devplane - WARNING - Slack tokens not configured. Running Web-Only mode.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+ERROR:    Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/starlette/routing.py", line 743, in lifespan
+    await receive()
+  File "/usr/local/lib/python3.11/site-packages/uvicorn/lifespan/on.py", line 137, in receive
+    return await self.receive_queue.get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/asyncio/queues.py", line 158, in get
+    await getter
+asyncio.exceptions.CancelledError: Cancelled via cancel scope 7fe3bbfaa890 by <Task pending name='Task-8' coro=<<async_generator_athrow without __name__>()>>
+
+2026-03-07 18:37:15,512 - asyncio - ERROR - Task exception was never retrieved
+future: <Task finished name='Task-8' coro=<<async_generator_athrow without __name__>()> exception=RuntimeError('Attempted to exit cancel scope in a different task than it was entered in')>
+  + Exception Group Traceback (most recent call last):
+  |   File "/usr/local/lib/python3.11/site-packages/anyio/_backends/_asyncio.py", line 783, in __aexit__
+  |     raise BaseExceptionGroup(
+  | BaseExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "/usr/local/lib/python3.11/site-packages/mcp/client/stdio/__init__.py", line 187, in stdio_client
+    |     yield read_stream, write_stream
+    | GeneratorExit
+    +------------------------------------
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.11/site-packages/mcp/client/stdio/__init__.py", line 180, in stdio_client
+    async with (
+  File "/usr/local/lib/python3.11/site-packages/anyio/_backends/_asyncio.py", line 789, in __aexit__
+    if self.cancel_scope.__exit__(type(exc), exc, exc.__traceback__):
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.11/site-packages/anyio/_backends/_asyncio.py", line 461, in __exit__
+    raise RuntimeError(
+RuntimeError: Attempted to exit cancel scope in a different task than it was entered in
+INFO:     127.0.0.1:44602 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57778 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38236 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60470 - "GET /api/health HTTP/1.1" 200 OK

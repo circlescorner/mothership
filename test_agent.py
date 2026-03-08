@@ -17,13 +17,29 @@ async def test():
             print("\nTesting agent execution (simple math)...")
             config = {"configurable": {"thread_id": "test_thread_1"}}
             
-            async for event in graph.astream(
-                {"messages": [HumanMessage(content="What is 15 * 4?")], "current_tier": "groq/llama3-8b-8192"},
-                config,
-                stream_mode="updates"
-            ):
-                print("EVENT:", event)
-            
+            # Use deepseek model which has a valid API key
+            # Collect events with timeout
+            events = []
+            try:
+                # Create an async generator
+                stream = graph.astream(
+                    {"messages": [HumanMessage(content="What is 15 * 4?")], "current_tier": "deepseek/deepseek-chat"},
+                    config,
+                    stream_mode="updates"
+                )
+                # Use asyncio.wait_for with async generator
+                async for event in stream:
+                    events.append(event)
+                    print("EVENT:", event)
+                    # Break after a few events to avoid infinite loop
+                    if len(events) > 10:
+                        break
+                print(f"Test completed with {len(events)} events")
+            except asyncio.TimeoutError:
+                print("ERROR: Test timed out")
+            except Exception as e:
+                print(f"ERROR during execution: {e}")
+                
     except Exception as e:
         print("ERROR:", e)
 

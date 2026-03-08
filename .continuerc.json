@@ -1,0 +1,51 @@
+{
+    "models": [
+        {
+            "title": "OpenCoder-8B (OpenRouter)",
+            "provider": "openrouter",
+            "model": "opencoder/opencoder-8b",
+            "apiKey": "${OPENROUTER_API_KEY}",
+            "contextLength": 8192
+        },
+        {
+            "title": "Qwen 2.5 Coder 32B (TogetherAI)",
+            "provider": "together",
+            "model": "Qwen/Qwen2.5-Coder-32B-Instruct",
+            "apiKey": "${TOGETHERAI_API_KEY}",
+            "contextLength": 32768
+        },
+        {
+            "title": "DeepSeek V3",
+            "provider": "deepseek",
+            "model": "deepseek-chat",
+            "apiKey": "${DEEPSEEK_API_KEY}",
+            "contextLength": 64000
+        },
+        {
+            "title": "Gemini 2.0 Flash (Free)",
+            "provider": "gemini",
+            "model": "gemini-2.0-flash",
+            "apiKey": "${GEMINI_API_KEY}",
+            "contextLength": 1000000
+        },
+        {
+            "title": "LLaMA 3.3 70B (Groq - Free)",
+            "provider": "groq",
+            "model": "llama-3.3-70b-versatile",
+            "apiKey": "${GROQ_API_KEY}",
+            "contextLength": 32768
+        }
+    ],
+    "tabAutocompleteModel": {
+        "title": "OpenCoder-8B (Fast Autocomplete)",
+        "provider": "openrouter",
+        "model": "opencoder/opencoder-8b",
+        "apiKey": "${OPENROUTER_API_KEY}"
+    },
+    "tabAutocompleteOptions": {
+        "debounceDelay": 500,
+        "maxPromptTokens": 2048,
+        "prefixPercentage": 0.85
+    },
+    "allowAnonymousTelemetry": false
+}

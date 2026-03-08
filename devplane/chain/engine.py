@@ -238,12 +238,34 @@ async def run_tier_pipeline(prompt: str, tier: dict, chain_steps: list[dict],
 # ─── Tournament Runner ────────────────────────────────────────────────────────
 
 async def run_tournament(prompt: str, project_id: int = 0,
-                         event_callback=None) -> dict:
+                         event_callback=None, mode: str = "tournament") -> dict:
     """Run the full tournament: multiple tiers in parallel, judge picks winner.
     
     This is the main entry point called by the Slack bot and dashboard.
     Now includes: memory recall before run, memory storage after, and performance tracking.
+    
+    Args:
+        mode: 'tournament' (default), 'mesh' (God-Mode iterative), or 'agent' (LangGraph tool agent)
     """
+    # ── Mode Delegation ──
+    if mode == "mesh":
+        from devplane.chain.mesh import run_mesh
+        return await run_mesh(prompt, project_id, event_callback=event_callback)
+
+    if mode == "agent":
+        from devplane.chain.agent import get_agent_graph
+        from langchain_core.messages import HumanMessage
+        try:
+            graph = get_agent_graph()
+            result = await graph.ainvoke(
+                {"messages": [HumanMessage(content=prompt)], "current_tier": "deepseek/deepseek-chat"},
+            )
+            final = result["messages"][-1].content if result["messages"] else ""
+            return {"status": "success", "final_output": final, "winning_tier": "agent", "total_cost": 0, "steps": []}
+        except Exception as e:
+            return {"status": "error", "final_output": str(e), "winning_tier": "", "total_cost": 0, "steps": []}
+
+    # ── Tournament Mode (original behavior below) ──
     await load_all_keys_to_env()
 
     # ── Memory: recall relevant past context ──

@@ -1,0 +1,93 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# DevPlane Production Docker Compose Configuration
+# ═══════════════════════════════════════════════════════════════════════════════
+
+version: "3.8"
+
+services:
+  # Main DevPlane Application
+  devplane:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: .env
+    restart: always
+    volumes:
+      - ./data:/app/data
+      - ./devplane.db:/app/devplane.db
+      - ./static:/app/static
+    environment:
+      - DEVPLANE_DB_PATH=/app/devplane.db
+      - ENV=production
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/api/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    depends_on:
+      - qdrant
+    networks:
+      - devplane-network
+
+  # Qdrant Vector Database (for semantic memory search)
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ./data/qdrant:/qdrant/storage
+    restart: always
+    environment:
+      - QDRANT__SERVICE__API_KEY=${QDRANT_KEY:-}
+    networks:
+      - devplane-network
+
+  # Cloudflare Tunnel (optional - for secure public access)
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run --token eyJhIjoiN2QzMWQwMDAzM2UxMTZhMjZiNDhhZmNiZDFiNmMxODQiLCJ0IjoiNmQ5NjA2ZjUtMmUwNS00ZWRmLTk3NTktMjkzNjg2Mjk0ZWU3IiwicyI6IkpPZlFDU0h0MmwzMzJiSHE2eUI0Q2tIOFlXejBNbXhHb09lRHY5Y3RuWmc9In0=
+    restart: always
+    depends_on:
+      - devplane
+    profiles:
+      - tunnel
+    networks:
+      - devplane-network
+
+  # Prometheus (optional - for metrics collection)
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./data/prometheus:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    restart: always
+    profiles:
+      - monitoring
+    networks:
+      - devplane-network
+
+  # Grafana (optional - for visualization)
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data/grafana:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    restart: always
+    profiles:
+      - monitoring
+    networks:
+      - devplane-network
+
+networks:
+  devplane-network:
+    driver: bridge

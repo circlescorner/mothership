@@ -41,6 +41,7 @@ class StepUpdate(BaseModel):
 class RunRequest(BaseModel):
     prompt: str
     project_id: int = 0
+    mode: str = "tournament"  # 'tournament', 'mesh', or 'agent'
 
 
 # ─── Chain Config CRUD ────────────────────────────────────────────────────────
@@ -157,15 +158,20 @@ async def update_step(step_id: int, data: StepUpdate):
 
 @router.post("/run")
 async def run_chain(data: RunRequest):
-    """Execute a chain and return the result."""
+    """Execute a chain and return the result. Supports tournament/mesh/agent modes."""
     project_id = data.project_id or await get_default_project_id()
+    mode = data.mode
     
-    # We maintain backwards compatibility with Tournament Mode for tests vs Agent Mode
+    # If mode specified, delegate directly via engine
+    if mode in ("mesh", "agent"):
+        from devplane.chain.engine import run_tournament
+        return await run_tournament(data.prompt, project_id, mode=mode)
+    
+    # Otherwise check chain config for tournament vs agent
     from devplane.chain.engine import run_tournament
     
     db = await get_db()
     try:
-        # Check if chain is tournament or agent
         proj_row = await db.execute("SELECT active_chain_id FROM projects WHERE id = ?", (project_id,))
         chain_id = (await proj_row.fetchone())["active_chain_id"]
         chain_row = await db.execute("SELECT tournament_mode FROM chains WHERE id = ?", (chain_id,))
@@ -174,7 +180,7 @@ async def run_chain(data: RunRequest):
         await db.close()
         
     if is_tournament:
-        result = await run_tournament(data.prompt, project_id)
+        result = await run_tournament(data.prompt, project_id, mode="tournament")
         return result
     else:
         # LangGraph Agent Mode

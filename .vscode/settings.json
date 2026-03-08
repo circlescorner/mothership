@@ -1,0 +1,40 @@
+{
+    "kilocode.apiProvider": "openrouter",
+    "kilocode.openRouterModelId": "anthropic/claude-sonnet-4",
+    "kilocode.modeApiConfigs": {
+        "code": {
+            "apiProvider": "openrouter",
+            "openRouterModelId": "anthropic/claude-sonnet-4"
+        },
+        "architect": {
+            "apiProvider": "openrouter",
+            "openRouterModelId": "anthropic/claude-sonnet-4"
+        },
+        "ask": {
+            "apiProvider": "openrouter",
+            "openRouterModelId": "deepseek/deepseek-chat"
+        },
+        "debug": {
+            "apiProvider": "openrouter",
+            "openRouterModelId": "qwen/qwen3-coder-next"
+        },
+        "review": {
+            "apiProvider": "openrouter",
+            "openRouterModelId": "google/gemini-2.0-flash-001"
+        }
+    },
+    "kilocode.enablePromptCompression": true,
+    "kilocode.autoApproveReadonly": true,
+    "continue.enableTabAutocomplete": true,
+    "continue.tabAutocompleteModel": {
+        "provider": "openrouter",
+        "model": "opencoder/opencoder-8b",
+        "title": "OpenCoder-8B (Tab Complete)"
+    },
+    "python.defaultInterpreterPath": "python",
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.black-formatter",
+        "editor.formatOnSave": true
+    },
+    "kilocode.openRouterApiKey": "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"
+}

@@ -1,0 +1,11 @@
+# Prometheus configuration for DevPlane monitoring
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'devplane'
+    static_configs:
+      - targets: ['devplane:8000']
+    metrics_path: '/api/metrics'
+    scrape_interval: 30s
