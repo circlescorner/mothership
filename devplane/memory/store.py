@@ -17,9 +17,54 @@ logger = logging.getLogger("devplane.memory")
 
 # ─── Embedding Model ─────────────────────────────────────────────────────────
 
-EMBED_MODEL = "gemini/text-embedding-004"  # Free tier
+async def get_memory_config():
+    """Fetch memory configuration from database or environment."""
+    from devplane.db import get_db
+    db = await get_db()
+    try:
+        row = await db.execute("SELECT * FROM memory_config WHERE id = 1")
+        config = await row.fetchone()
+        if config:
+            return {
+                "embedding_model": config["embedding_model"] or "gemini/text-embedding-004",
+                "embedding_dimension": config["embedding_dimension"] or 768,
+                "qdrant_url": config["qdrant_url"] or "",
+                "qdrant_collection": config["qdrant_collection"] or "devplane_memory",
+                "max_memory_items": config["max_memory_items"] or 1000,
+                "timeout": config.get("timeout_seconds", 10.0),
+            }
+    except Exception as e:
+        logger.warning(f"Failed to fetch memory config: {e}")
+    # Fallback to environment variables
+    import os
+    return {
+        "embedding_model": os.environ.get("EMBEDDING_MODEL", "gemini/text-embedding-004"),
+        "embedding_dimension": int(os.environ.get("EMBEDDING_DIMENSION", 768)),
+        "qdrant_url": os.environ.get("QDRANT_URL", ""),
+        "qdrant_collection": os.environ.get("QDRANT_COLLECTION", "devplane_memory"),
+        "max_memory_items": int(os.environ.get("MAX_MEMORY_ITEMS", 1000)),
+        "timeout": float(os.environ.get("EMBED_TIMEOUT", 10.0)),
+    }
+
+# Cache config
+_memory_config = None
+
+async def get_cached_memory_config():
+    global _memory_config
+    if _memory_config is None:
+        _memory_config = await get_memory_config()
+    return _memory_config
+
+async def get_qdrant_config():
+    config = await get_cached_memory_config()
+    return {
+        "url": config["qdrant_url"],
+        "collection": config["qdrant_collection"]
+    }
+
+EMBED_MODEL = "gemini/text-embedding-004"  # Default fallback
 EMBED_DIM = 768
-EMBED_TIMEOUT = 10.0  # Timeout in seconds for embedding API calls
+EMBED_TIMEOUT = 10.0
 
 
 async def embed_text(text: str) -> list[float]:
@@ -35,48 +80,55 @@ async def embed_text(text: str) -> list[float]:
         Falls back to hash-based embedding if API call fails or times out.
         This prevents terminals from getting stuck on slow/unresponsive APIs.
     """
+    config = await get_cached_memory_config()
+    embed_model = config["embedding_model"]
+    embed_dim = config["embedding_dimension"]
+    embed_timeout = config["timeout"]
     try:
         from litellm import aembedding
         
         # Create embedding task with timeout to prevent hanging
         response = await asyncio.wait_for(
-            aembedding(model=EMBED_MODEL, input=[text]),
-            timeout=EMBED_TIMEOUT
+            aembedding(model=embed_model, input=[text]),
+            timeout=embed_timeout
         )
         
         # Validate response structure
         if not response or not hasattr(response, 'data') or not response.data:
             logger.warning("Empty or invalid embedding response, using fallback")
-            return _hash_embed(text)
+            return await _hash_embed(text, embed_dim)
             
         embedding_data = response.data[0]
         if isinstance(embedding_data, dict) and "embedding" in embedding_data:
             return embedding_data["embedding"]
         else:
             logger.warning(f"Unexpected embedding response format: {type(embedding_data)}")
-            return _hash_embed(text)
+            return await _hash_embed(text, embed_dim)
             
     except asyncio.TimeoutError:
-        logger.warning(f"Embedding API timed out after {EMBED_TIMEOUT}s, using fallback")
-        return _hash_embed(text)
+        logger.warning(f"Embedding API timed out after {embed_timeout}s, using fallback")
+        return await _hash_embed(text, embed_dim)
     except ImportError as e:
         logger.warning(f"LiteLLM not available: {e}, using fallback")
-        return _hash_embed(text)
+        return await _hash_embed(text, embed_dim)
     except Exception as e:
         logger.warning(f"Embedding failed (falling back to hash): {type(e).__name__}: {e}")
         # Fallback: simple hash-based pseudo-embedding for when API is unavailable
-        return _hash_embed(text)
+        return await _hash_embed(text, embed_dim)
 
 
-def _hash_embed(text: str) -> list[float]:
+async def _hash_embed(text: str, dimension: int = None) -> list[float]:
     """Deterministic pseudo-embedding from text hash. Used as fallback."""
     import struct
-    # SHA256 digest is 32 bytes, we need EMBED_DIM * 4 bytes total
+    if dimension is None:
+        config = await get_cached_memory_config()
+        dimension = config["embedding_dimension"]
+    # SHA256 digest is 32 bytes, we need dimension * 4 bytes total
     digest = hashlib.sha256(text.encode()).digest()
-    repeats = (EMBED_DIM * 4 + len(digest) - 1) // len(digest)  # ceil division
+    repeats = (dimension * 4 + len(digest) - 1) // len(digest)  # ceil division
     h = digest * repeats  # repeat enough to cover required bytes
-    floats = [struct.unpack('f', h[i:i+4])[0] % 1.0 for i in range(0, EMBED_DIM * 4, 4)]
-    return floats[:EMBED_DIM]
+    floats = [struct.unpack('f', h[i:i+4])[0] % 1.0 for i in range(0, dimension * 4, 4)]
+    return floats[:dimension]
 
 
 # ─── Memory Store ────────────────────────────────────────────────────────────
@@ -249,16 +301,15 @@ QDRANT_COLLECTION = "devplane_memory"
 
 async def _check_qdrant() -> bool:
     """Check if Qdrant is available."""
-    import os
-    url = os.environ.get("QDRANT_URL", "")
-    return bool(url)
+    config = await get_cached_memory_config()
+    return bool(config["qdrant_url"])
 
 
 async def _store_in_qdrant(embed_id: str, embedding: list, content: str,
                            project_id: int, metadata: dict = None):
     """Store embedding in Qdrant vector DB."""
-    import os
-    url = os.environ.get("QDRANT_URL", "")
+    config = await get_cached_memory_config()
+    url = config["qdrant_url"]
     key = os.environ.get("QDRANT_KEY", "")
     if not url:
         return
@@ -267,14 +318,16 @@ async def _store_in_qdrant(embed_id: str, embedding: list, content: str,
     from qdrant_client.models import PointStruct, VectorParams, Distance
 
     client = QdrantClient(url=url, api_key=key if key else None)
+    collection = config["qdrant_collection"]
+    embed_dim = config["embedding_dimension"]
 
     # Ensure collection exists
     try:
-        client.get_collection(QDRANT_COLLECTION)
+        client.get_collection(collection)
     except Exception:
         client.create_collection(
-            QDRANT_COLLECTION,
-            vectors_config=VectorParams(size=EMBED_DIM, distance=Distance.COSINE)
+            collection,
+            vectors_config=VectorParams(size=embed_dim, distance=Distance.COSINE)
         )
 
     point = PointStruct(
@@ -287,13 +340,13 @@ async def _store_in_qdrant(embed_id: str, embedding: list, content: str,
             "created_at": datetime.utcnow().isoformat(),
         }
     )
-    client.upsert(QDRANT_COLLECTION, [point])
+    client.upsert(collection, [point])
 
 
 async def _search_qdrant(query: str, project_id: int, k: int) -> list[dict]:
     """Search Qdrant for similar memories."""
-    import os
-    url = os.environ.get("QDRANT_URL", "")
+    config = await get_cached_memory_config()
+    url = config["qdrant_url"]
     key = os.environ.get("QDRANT_KEY", "")
     if not url:
         return []
@@ -303,6 +356,7 @@ async def _search_qdrant(query: str, project_id: int, k: int) -> list[dict]:
 
     client = QdrantClient(url=url, api_key=key if key else None)
     embedding = await embed_text(query)
+    collection = config["qdrant_collection"]
 
     filter_cond = None
     if project_id:
@@ -312,7 +366,7 @@ async def _search_qdrant(query: str, project_id: int, k: int) -> list[dict]:
 
     try:
         results = client.search(
-            collection_name=QDRANT_COLLECTION,
+            collection_name=collection,
             query_vector=embedding,
             query_filter=filter_cond,
             limit=k,

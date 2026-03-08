@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from typing import Dict, Any
 from devplane.infra.manager import get_infra_manager
 
@@ -81,6 +82,7 @@ class InfraManagerAgent:
             status_doc += f"- **{d['name']}** (ID: {d['id']}): {d['status']}\n"
             
         # Write to a local file or push to a wiki
+        os.makedirs("data", exist_ok=True)
         with open("data/infra_status.md", "w") as f:
             f.write(status_doc)
 

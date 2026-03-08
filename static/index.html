@@ -24,6 +24,12 @@
                 <div class="nav-item active" data-page="dashboard">
                     <span class="icon">📊</span> Dashboard
                 </div>
+                <div class="nav-item" data-page="mesh">
+                    <span class="icon">🕸️</span> Agentic Mesh
+                </div>
+                <div class="nav-item" data-page="meshconfig">
+                    <span class="icon">⚙️</span> Mesh Configuration
+                </div>
                 <div class="nav-item" data-page="chains">
                     <span class="icon">🔗</span> Chain Builder
                 </div>
@@ -44,6 +50,12 @@
                 </div>
                 <div class="nav-item" data-page="history">
                     <span class="icon">📜</span> Run History
+                </div>
+                <div class="nav-item" data-page="deploy">
+                    <span class="icon">🚀</span> Deployment Wizard
+                </div>
+                <div class="nav-item" data-page="secrets">
+                    <span class="icon">🔐</span> Secrets Management
                 </div>
             </nav>
             <div class="sidebar-footer">
@@ -70,6 +82,68 @@
             <div class="page-content">
 
                 <!-- ════════════════════ DASHBOARD ════════════════════ -->
+
+                <!-- ════════════════════ AGENTIC MESH ════════════════════ -->
+                <div class="page" id="page-mesh">
+                    <div class="grid-2" style="margin-bottom:28px">
+                        <div class="card">
+                            <h3>🕸️ Mesh Configuration</h3>
+                            <div id="mesh-config">
+                                <div style="padding:12px 0">
+                                    <label style="display:block;margin-bottom:8px;font-size:13px;color:var(--text-dim)">Execution Mode</label>
+                                    <select id="mesh-mode" style="width:100%;padding:8px;border-radius:6px;background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-main)">
+                                        <option value="tournament">Tournament (Parallel Tiers + Judge)</option>
+                                        <option value="mesh">God-Mode Mesh (Architect → Worker → Critic)</option>
+                                        <option value="agent">Agent Mode (LangGraph Tool Agent)</option>
+                                    </select>
+                                </div>
+                                <div style="padding:12px 0">
+                                    <label style="display:block;margin-bottom:8px;font-size:13px;color:var(--text-dim)">Default Tier</label>
+                                    <select id="mesh-tier" style="width:100%;padding:8px;border-radius:6px;background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-main)">
+                                        <option value="cheap">Cheap (Budget-optimized)</option>
+                                        <option value="mid">Mid (Balanced)</option>
+                                        <option value="premium">Premium (Best quality)</option>
+                                    </select>
+                                </div>
+                                <div style="padding:12px 0">
+                                    <label style="display:block;margin-bottom:8px;font-size:13px;color:var(--text-dim)">Max Iterations</label>
+                                    <input type="number" id="mesh-iterations" value="3" min="1" max="10" style="width:100%;padding:8px;border-radius:6px;background:var(--bg-elevated);border:1px solid var(--border);color:var(--text-main)">
+                                </div>
+                                <button class="btn btn-primary" onclick="saveMeshConfig()" style="margin-top:12px">Save Configuration</button>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <h3>🔌 MCP Servers</h3>
+                            <div id="mcp-servers-list">
+                                <div style="color:var(--text-dim);font-size:13px">Loading MCP servers...</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="card" style="margin-bottom:28px">
+                        <h3>🕸️ Mesh Visualization</h3>
+                        <div id="mesh-visualization" style="min-height:400px;background:var(--bg-elevated);border-radius:8px;position:relative;overflow:hidden">
+                            <div style="color:var(--text-dim);font-size:13px;padding:20px">Loading mesh visualization...</div>
+                        </div>
+                    </div>
+                    
+                    <div class="grid-2">
+                        <div class="card">
+                            <h3>🛤️ Mesh Routes</h3>
+                            <div id="mesh-routes-list">
+                                <div style="color:var(--text-dim);font-size:13px">Loading routes...</div>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <h3>🏆 Tournament History</h3>
+                            <div id="tournament-history">
+                                <div style="color:var(--text-dim);font-size:13px">Loading tournaments...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ════════════════════ DASHBOARD CONTINUED ════════════════════ -->
                 <div class="page active" id="page-dashboard">
                     <div class="grid-4" style="margin-bottom:28px">
                         <div class="stat-card">
@@ -206,8 +280,38 @@
                                 Run</button>
                         </div>
                     </div>
+    
+                    <!-- ════════════════════ DEPLOYMENT WIZARD ════════════════════ -->
+                    <div class="page" id="page-deploy">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>🚀 Deployment Wizard</h3>
+                            </div>
+                            <iframe src="/deploy" style="width:100%; height:800px; border:none; border-radius:8px;"></iframe>
+                        </div>
+                    </div>
+    
+                    <!-- ════════════════════ SECRETS MANAGEMENT ════════════════════ -->
+                    <div class="page" id="page-secrets">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>🔐 Secrets Management</h3>
+                            </div>
+                            <iframe src="/secrets" style="width:100%; height:800px; border:none; border-radius:8px;"></iframe>
+                        </div>
+                    </div>
+    
+                    <!-- ════════════════════ MESH CONFIGURATION ════════════════════ -->
+                    <div class="page" id="page-meshconfig">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>⚙️ Mesh Configuration</h3>
+                            </div>
+                            <iframe src="/mesh" style="width:100%; height:900px; border:none; border-radius:8px;"></iframe>
+                        </div>
+                    </div>
+    
                 </div>
-
                 <!-- ════════════════════ PROVIDERS ════════════════════ -->
                 <div class="page" id="page-providers">
                     <div class="card">

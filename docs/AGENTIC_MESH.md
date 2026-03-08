@@ -1,50 +1,264 @@
-# The Agentic Mesh Architecture
+# The Unified Agentic Mesh Architecture
 
-DevPlane implements a unified "Agentic Mesh" architecture that leverages the Model Context Protocol (MCP) as a universal communication backbone to integrate the top five open-source LLM tools.
+DevPlane implements a unified "Agentic Mesh" architecture that leverages the Model Context Protocol (MCP) as a universal communication backbone to integrate AI frameworks, Slack tournament capabilities, and visual configuration through a single pane of glass.
+
+## System Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           DEVPLANE UNIFIED MESH                              │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐  │
+│  │   SLACK     │    │   DASHBOARD │    │   MCP IDE   │    │   REST API  │  │
+│  │  INTERFACE  │    │    (WEB)    │    │  (EXT IDE)  │    │  (PROGRAM)  │  │
+│  └──────┬──────┘    └──────┬──────┘    └──────┬──────┘    └──────┬──────┘  │
+│         │                  │                  │                  │          │
+│         └──────────────────┼──────────────────┼──────────────────┘          │
+│                            │                  │                              │
+│                    ┌───────▼──────────────────▼───────┐                      │
+│                    │      MCP HOST / GATEWAY          │                      │
+│                    │  (Slack Bot + API + Dashboard)   │                      │
+│                    └───────────────┬──────────────────┘                      │
+│                                │                                              │
+│         ┌──────────────────────┼──────────────────────┐                     │
+│         │                      │                      │                     │
+│  ┌──────▼──────┐    ┌──────────▼──────────┐   ┌──────▼──────┐              │
+│  │   TOURNAMENT│    │      GOD-MODE       │   │    AGENT    │              │
+│  │   ENGINE    │    │       MESH          │   │    MODE     │              │
+│  └──────┬──────┘    └──────────┬──────────┘   └──────┬──────┘              │
+│         │                      │                      │                      │
+│         └──────────────────────┼──────────────────────┘                      │
+│                                │                                              │
+│                    ┌───────────▼───────────┐                                 │
+│                    │   EXECUTION LAYER     │                                 │
+│                    │  (LangGraph Pipeline) │                                 │
+│                    └───────────┬───────────┘                                 │
+│                                │                                             │
+│  ══════════════════════════════╪══════════════════════════════════════════  │
+│                    MCP SERVER LAYER (Tool Providers)                        │
+│  ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌────────────┐ ┌───────────┐ │
+│  │ LlamaIndex │ │  Haystack  │ │   CrewAI   │ │ PydanticAI │ │Semantic   │ │
+│  │ (Retrieval)│ │  (Search)  │ │(Orchestrat)│ │ (Validate) │ │  Kernel   │ │
+│  └────────────┘ └────────────┘ └────────────┘ └────────────┘ └───────────┘ │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 ## Core Components
 
-The system treats each framework as a specialized MCP Server that exposes its unique strengths as standardized tools to a central MCP Host (the Slack Bot).
+### 1. Execution Modes
 
-1. **LlamaIndex (The Librarian)**: Operates as an MCP Server providing data retrieval tools. It indexes private documentation and provides high-accuracy context to the rest of the mesh.
-2. **Haystack (The Search Specialist)**: Acts as an MCP Server for enterprise search. It manages complex NLP pipelines and connects to production-grade document stores.
-3. **CrewAI (The Manager)**: Functions as the multi-agent orchestrator. It provides task execution tools where specialized agents collaborate to solve multi-step problems.
-4. **PydanticAI (The Validator)**: Serves as the "Safe Gateway." Every piece of data entering or leaving the mesh is validated against strict schemas to ensure production-grade reliability.
-5. **Semantic Kernel (The Enterprise Bridge)**: Connects the mesh to existing business logic, exposing legacy enterprise functions as MCP-compatible tools.
+The Agentic Mesh supports three primary execution modes, configurable via Slack, Dashboard, or API:
 
-## Visualizing the Mesh
+#### Tournament Mode (`!tournament`)
+- Runs multiple **tiers** in parallel (cheap, mid, premium)
+- A **judge** model evaluates and picks the best result
+- Each tier has its own planner, executor, reviewer, and judge models
+- **Use case**: When quality matters and you want the best answer regardless of cost
 
-DevPlane integrates **Langflow** and **Flowise AI** to provide a "single pane of glass" for visualizing and configuring chains and networking.
+#### God-Mode Mesh (`!mesh`)
+- Iterative **Architect → Worker → Critic** loop
+- Up to 3 iterations of code generation and review
+- **Use case**: Complex coding tasks requiring high-quality, production-ready code
 
-- **Langflow**: Available at `http://localhost:7860`
-- **Flowise**: Available at `http://localhost:3001`
+#### Agent Mode (`!agent`)
+- LangGraph-powered tool agent with persistent memory
+- Uses tools for search, memory, infrastructure, and more
+- **Use case**: Multi-step tasks requiring tool use and stateful conversation
 
-These low-code platforms allow you to drag and drop components from all frameworks onto a single canvas, visually mapping how a query flows through the system.
+### 2. MCP Server Integration
 
-## Real-time Observability
+Each framework operates as an MCP Server exposing specialized tools:
 
-**Langfuse** is integrated into the mesh to provide real-time observability. It displays live trace graphs of every "node" in the mesh, allowing for deep-dive debugging of the execution chain.
+| Framework | Role | MCP Tools | Use Case |
+|-----------|------|-----------|----------|
+| **LlamaIndex** | The Librarian | `search_docs`, `index_document`, `query_index` | Private documentation retrieval |
+| **Haystack** | Search Specialist | `enterprise_search`, `build_pipeline`, `query_nlp` | Production-grade search |
+| **CrewAI** | The Manager | `create_crew`, `kickoff_crew`, `add_agent` | Multi-agent orchestration |
+| **PydanticAI** | The Validator | `validate_schema`, `validate_output`, `validate_input` | Type-safe validation |
+| **Semantic Kernel** | Enterprise Bridge | `invoke_function`, `create_skill`, `execute_plan` | Legacy system integration |
 
-- **Langfuse**: Available at `http://localhost:3002`
+### 3. Slack Tournament System
 
-## The Central Hub: Slack Integration
+Slack serves as the primary conversational interface with these commands:
 
-Slack acts as the primary user interface (the MCP Client) for the Agentic Mesh.
+| Command | Description | Example |
+|---------|-------------|---------|
+| `!mesh_route <task>` | Route task to appropriate MCP servers | `!mesh_route search company docs for API` |
+| `!mesh <task>` | Run God-Mode Mesh | `!mesh write a REST API` |
+| `!tournament <task>` | Run Tournament Mode | `!tournament explain quantum computing` |
+| `!agent <task>` | Run Agent Mode | `!agent find and fix all bugs in repo` |
+| `!spinup worker` | Spin up ephemeral worker | `!spinup worker` |
+| `!sleep` | Collapse workspaces (scale-to-zero) | `!sleep` |
+| `!wake` | Restore workspaces from snapshots | `!wake` |
+| `!status` | Check infrastructure status | `!status` |
 
-- **Command**: `!mesh_route <task>`
-- **Workflow**:
-  1. A user sends a message in Slack using the `!mesh_route` command.
-  2. The Slack App (the Host) broadcasts the intent to the MCP Mesh.
-  3. The mesh intelligently routes the task to the appropriate MCP servers (e.g., Haystack for search, LlamaIndex for retrieval, CrewAI for orchestration).
-  4. The unified response is posted back to the Slack thread, along with links to Langfuse and Langflow for debugging and configuration.
+### 4. Visual Configuration (DevPlane Dashboard)
 
-## Persistent Agents
+The dashboard provides a "single pane of glass" for:
 
-DevPlane includes two persistent agents that run continuously in the background:
+- **Chain Builder**: Configure execution pipelines (planner → executor → reviewer → judge)
+- **Tier Configuration**: Set models for each quality tier
+- **Mesh Visualization**: See how tasks flow through the system
+- **Tournament Brackets**: View parallel tier execution and judge selection
+- **Real-time Observability**: Live execution with Langfuse traces
 
-1. **Infra Manager**: Dedicated to managing infrastructure, maintaining documented status, and handling aggressive scale-to-zero operations based on budget limits.
-2. **Builder**: Dedicated to building and implementing improvements on DevPlane itself.
+### 5. Persistent Agents
 
-## Budgeting and Scale-to-Zero
+Two background agents run continuously:
 
-The Infra Manager agent continuously monitors the daily budget. If spending approaches the limit (90%), it enables an aggressive scale-to-zero mode, automatically snapshotting and destroying all non-essential droplets to prevent budget overruns.
+1. **Infra Manager**
+   - Monitors infrastructure and budget
+   - Executes scale-to-zero when budget hits 90%
+   - Creates snapshots before destroying droplets
+
+2. **Builder**
+   - Builds and implements improvements to DevPlane
+   - Can be invoked via Slack or API
+
+## Configuration
+
+### Database Schema
+
+The mesh is fully configurable via SQLite:
+
+```sql
+-- Mesh configurations
+CREATE TABLE mesh_configs (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    execution_mode TEXT DEFAULT 'tournament',  -- tournament, mesh, agent
+    mcp_servers_enabled TEXT DEFAULT '[]',     -- JSON array of server names
+    default_tier TEXT DEFAULT 'mid',
+    max_iterations INTEGER DEFAULT 3,
+    timeout_seconds INTEGER DEFAULT 60,
+    config_json TEXT DEFAULT '{}'
+);
+
+-- Tournament brackets
+CREATE TABLE tournament_brackets (
+    id INTEGER PRIMARY KEY,
+    run_id INTEGER REFERENCES runs(id),
+    tier_results TEXT DEFAULT '[]',  -- JSON of each tier's output
+    judge_selection TEXT,
+    winner_tier TEXT,
+    execution_time_ms REAL
+);
+
+-- MCP server status
+CREATE TABLE mcp_servers (
+    id INTEGER PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    server_type TEXT NOT NULL,  -- llamaindex, haystack, crewai, pydanticai, semantickernel
+    endpoint TEXT,
+    status TEXT DEFAULT 'offline',  -- online, offline, error
+    last_ping TEXT,
+    tools_json TEXT DEFAULT '[]'
+);
+```
+
+### Environment Variables
+
+```bash
+# MCP Server Configuration
+LLAMAINDEX_ENABLED=true
+HAYSTACK_ENABLED=true
+CREWAI_ENABLED=true
+PYDANTICAI_ENABLED=true
+SEMANTIC_KERNEL_ENABLED=true
+
+# Observability
+LANGFUSE_PUBLIC_KEY=
+LANGFUSE_SECRET_KEY=
+LANGFUSE_HOST=http://localhost:3002
+
+# Visualization (optional)
+LANGFLOW_URL=http://localhost:7860
+FLOWISE_URL=http://localhost:3001
+```
+
+## API Endpoints
+
+### Mesh Configuration
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/mesh/config` | Get mesh configuration |
+| PUT | `/api/mesh/config` | Update mesh configuration |
+| GET | `/api/mesh/servers` | List MCP server status |
+| POST | `/api/mesh/servers/{name}/test` | Test MCP server connection |
+| GET | `/api/mesh/visualize` | Get mesh visualization data |
+
+### Execution
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/chains/run` | Run chain (tournament/mesh/agent) |
+| POST | `/api/chains/run/stream` | Run with SSE streaming |
+| GET | `/api/runs/{id}` | Get run result and steps |
+
+### Tournament
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/tournaments` | List tournament history |
+| GET | `/api/tournaments/{id}` | Get tournament bracket details |
+
+## Safety & Best Practices
+
+### Rate Limiting
+- API: 100 requests/minute per project
+- Slack: 10 commands/minute per user
+- MCP Tools: 50 calls/minute per tool
+
+### Budget Protection
+- Daily/weekly/monthly budgets enforced
+- Auto-scale-to-zero at 90% budget
+- Hard stop at 100% budget
+
+### Input Validation
+- All prompts sanitized for prompt injection
+- PydanticAI validates all inputs/outputs
+- MCP tools have strict schema definitions
+
+### Security
+- API keys masked in responses
+- Secrets encrypted at rest
+- SSH commands timeout-protected
+
+## Observability
+
+### Langfuse Integration
+- Trace every node in the mesh
+- View latency, cost, and quality metrics
+- Debug with detailed span data
+
+### Dashboard Metrics
+- Total runs, success rate, average cost
+- Per-tier performance comparison
+- Model quality rankings
+
+## Quick Start
+
+1. **Configure Providers**: Add API keys in Dashboard → Providers
+2. **Set Budgets**: Configure daily/weekly limits in Dashboard → Credits
+3. **Test Execution**: Run `!tournament hello` in Slack
+4. **View Results**: Check Dashboard → History for execution details
+5. **Configure Mesh**: Adjust tiers and modes in Dashboard → Chains
+
+## Advanced: Custom MCP Tools
+
+Register custom MCP tools for your specific needs:
+
+```python
+from devplane.infra.mcp_server import server
+
+@server.list_tools()
+async def custom_tools():
+    return [Tool(
+        name="my_custom_tool",
+        description="Custom tool description",
+        inputSchema={"type": "object", "properties": {...}}
+    )]
+```

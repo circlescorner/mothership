@@ -168,21 +168,29 @@ def init_slack():
             mesh_query = query[12:].strip()
             await say(text=f"🕸️ *Agentic Mesh Engaged.* Routing task: '{mesh_query}'...", thread_ts=thread_ts)
             
-            # Mock routing logic to the different MCP servers
+            # Get routing from database
+            from devplane.api.mesh import route_to_mcp_server
+            matched_servers = await route_to_mcp_server(mesh_query)
+            
+            # Build routing log based on matched servers
             route_log = []
-            if "search" in mesh_query.lower() or "find" in mesh_query.lower():
-                route_log.append("🔍 *Haystack (Search Specialist)*: Found relevant enterprise documents.")
-            if "document" in mesh_query.lower() or "index" in mesh_query.lower():
-                route_log.append("📚 *LlamaIndex (The Librarian)*: Retrieved high-accuracy context from private docs.")
-            if "validate" in mesh_query.lower() or "schema" in mesh_query.lower():
-                route_log.append("🛡️ *PydanticAI (The Validator)*: Validated data against strict schemas.")
-            if "enterprise" in mesh_query.lower() or "logic" in mesh_query.lower():
-                route_log.append("🌉 *Semantic Kernel (Enterprise Bridge)*: Invoked legacy business logic.")
+            server_descriptions = {
+                "llamaindex": ("📚", "LlamaIndex", "The Librarian"),
+                "haystack": ("🔍", "Haystack", "The Search Specialist"),
+                "crewai": ("👔", "CrewAI", "The Manager"),
+                "pydanticai": ("🛡️", "PydanticAI", "The Validator"),
+                "semantickernel": ("🌉", "Semantic Kernel", "The Enterprise Bridge"),
+            }
             
-            # CrewAI always orchestrates
-            route_log.append("👔 *CrewAI (The Manager)*: Orchestrated agents to format the final report.")
+            for server in matched_servers:
+                if server in server_descriptions:
+                    icon, name, role = server_descriptions[server]
+                    route_log.append(f"{icon} *{name} ({role})*: Processing request...")
             
-            response_text = "\n".join(route_log) + "\n\n✅ *Task Completed Successfully.*\n🔗 View execution trace in Langfuse: http://localhost:3002\n🔗 Configure chains in Langflow: http://localhost:7860"
+            if not route_log:
+                route_log.append("👔 *CrewAI (The Manager)*: Orchestrated agents to format the final report.")
+            
+            response_text = "\n".join(route_log) + "\n\n✅ *Task Completed Successfully.*\n🔗 View execution trace in Langfuse: http://localhost:3002\n🔗 Configure mesh in DevPlane: Dashboard → Agentic Mesh"
             
             await say(text=response_text, thread_ts=thread_ts)
             return

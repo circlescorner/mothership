@@ -323,6 +323,138 @@ CREATE INDEX IF NOT EXISTS idx_gpu_jobs_status ON gpu_jobs(status);
 CREATE INDEX IF NOT EXISTS idx_workflows_active ON workflows(is_active);
 CREATE INDEX IF NOT EXISTS idx_token_cache_expires ON token_cache(expires_at);
 CREATE INDEX IF NOT EXISTS idx_devplane_tasks_status ON devplane_tasks(status);
+
+-- ═══ UNIFIED AGENTIC MESH CONFIGURATION ═══
+
+-- Mesh global configuration
+CREATE TABLE IF NOT EXISTS mesh_configs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    execution_mode TEXT DEFAULT 'tournament' CHECK(execution_mode IN ('tournament', 'mesh', 'agent')),
+    mcp_servers_enabled TEXT DEFAULT '[]',
+    default_tier TEXT DEFAULT 'mid',
+    max_iterations INTEGER DEFAULT 3,
+    timeout_seconds INTEGER DEFAULT 60,
+    config_json TEXT DEFAULT '{}',
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Mesh role configuration (per-mesh overrides)
+CREATE TABLE IF NOT EXISTS mesh_role_config (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mesh_config_id INTEGER NOT NULL REFERENCES mesh_configs(id) ON DELETE CASCADE,
+    role_name TEXT NOT NULL,
+    model_slug TEXT,
+    iteration_limit INTEGER,
+    timeout_seconds INTEGER DEFAULT 60,
+    config_json TEXT DEFAULT '{}',
+    UNIQUE(mesh_config_id, role_name)
+);
+
+-- MCP server registry and status
+CREATE TABLE IF NOT EXISTS mcp_servers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    display_name TEXT NOT NULL,
+    server_type TEXT NOT NULL CHECK(server_type IN ('llamaindex', 'haystack', 'crewai', 'pydanticai', 'semantickernel', 'custom')),
+    endpoint TEXT,
+    status TEXT DEFAULT 'offline' CHECK(status IN ('online', 'offline', 'error')),
+    enabled INTEGER DEFAULT 1,
+    last_ping TEXT,
+    tools_json TEXT DEFAULT '[]',
+    config_json TEXT DEFAULT '{}',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Tournament bracket results
+CREATE TABLE IF NOT EXISTS tournament_brackets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id INTEGER REFERENCES runs(id),
+    tier_results TEXT DEFAULT '[]',
+    judge_selection TEXT,
+    winner_tier TEXT,
+    execution_time_ms REAL,
+    cost_per_tier TEXT DEFAULT '{}',
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Mesh routing rules (for !mesh_route command)
+CREATE TABLE IF NOT EXISTS mesh_routes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    keyword TEXT NOT NULL,
+    mcp_server TEXT NOT NULL,
+    priority INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Visual mesh node positions
+CREATE TABLE IF NOT EXISTS mesh_visualization (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    node_type TEXT NOT NULL,
+    node_id TEXT NOT NULL,
+    position_x REAL DEFAULT 0,
+    position_y REAL DEFAULT 0,
+    config_json TEXT DEFAULT '{}',
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Memory configuration
+CREATE TABLE IF NOT EXISTS memory_config (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    embedding_model TEXT DEFAULT 'text-embedding-ada-002',
+    embedding_dimension INTEGER DEFAULT 1536,
+    qdrant_url TEXT DEFAULT 'http://localhost:6333',
+    qdrant_collection TEXT DEFAULT 'devplane_memories',
+    max_memory_items INTEGER DEFAULT 1000,
+    config_json TEXT DEFAULT '{}',
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Optimizer configuration
+CREATE TABLE IF NOT EXISTS optimizer_config (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    complexity_threshold REAL DEFAULT 0.5,
+    scoring_weights_json TEXT DEFAULT '{"accuracy": 0.4, "cost": 0.3, "speed": 0.3}',
+    max_iterations INTEGER DEFAULT 3,
+    timeout_seconds INTEGER DEFAULT 30,
+    config_json TEXT DEFAULT '{}',
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- Tool configuration
+CREATE TABLE IF NOT EXISTS tool_config (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tool_name TEXT UNIQUE NOT NULL,
+    display_name TEXT NOT NULL,
+    enabled INTEGER DEFAULT 1,
+    timeout_seconds INTEGER DEFAULT 30,
+    permissions_json TEXT DEFAULT '[]',
+    config_json TEXT DEFAULT '{}',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+-- LangChain dynamic tools
+CREATE TABLE IF NOT EXISTS langchain_tools (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    description TEXT,
+    schema_json TEXT,
+    handler_type TEXT,
+    handler_config_json TEXT,
+    enabled BOOLEAN DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_mesh_configs_active ON mesh_configs(is_active);
+CREATE INDEX IF NOT EXISTS idx_mcp_servers_status ON mcp_servers(status);
+CREATE INDEX IF NOT EXISTS idx_mesh_routes_keyword ON mesh_routes(keyword);
+CREATE INDEX IF NOT EXISTS idx_tournament_brackets_run ON tournament_brackets(run_id);
 """
 
 
@@ -397,8 +529,136 @@ async def _seed_defaults(db: aiosqlite.Connection):
             (name, display, api_key, enabled)
         )
 
+    # Seed default mesh configuration
+    await db.execute("""
+        INSERT OR IGNORE INTO mesh_configs (id, name, execution_mode, mcp_servers_enabled, default_tier, max_iterations, timeout_seconds)
+        VALUES (1, 'Default Mesh', 'tournament', '["llamaindex", "haystack", "crewai", "pydanticai", "semantickernel"]', 'mid', 3, 60)
+    """)
+
+    # Seed default mesh role configuration
+    mesh_config_id = 1
+    role_configs = [
+        ('architect', 'openrouter/anthropic/claude-sonnet-4', 3, 60),
+        ('worker', 'deepseek/deepseek-chat', 3, 60),
+        ('critic', 'openrouter/anthropic/claude-sonnet-4', 3, 60),
+    ]
+    for role_name, model_slug, iteration_limit, timeout_seconds in role_configs:
+        await db.execute("""
+            INSERT OR REPLACE INTO mesh_role_config (mesh_config_id, role_name, model_slug, iteration_limit, timeout_seconds)
+            VALUES (?, ?, ?, ?, ?)
+        """, (mesh_config_id, role_name, model_slug, iteration_limit, timeout_seconds))
+
+    # Seed default memory configuration
+    await db.execute("""
+        INSERT OR IGNORE INTO memory_config (id, embedding_model, embedding_dimension, qdrant_url, qdrant_collection, max_memory_items)
+        VALUES (1, 'text-embedding-ada-002', 1536, 'http://localhost:6333', 'devplane_memories', 1000)
+    """)
+
+    # Seed default optimizer configuration
+    await db.execute("""
+        INSERT OR IGNORE INTO optimizer_config (id, complexity_threshold, scoring_weights_json, max_iterations, timeout_seconds)
+        VALUES (1, 0.5, '{"accuracy": 0.4, "cost": 0.3, "speed": 0.3}', 3, 30)
+    """)
+
+    # Seed default tool configuration (core tools)
+    core_tools = [
+        ('search_web', 'Web Search', 1, 30, '[]'),
+        ('execute_command', 'Execute Command', 1, 30, '[]'),
+        ('read_file', 'Read File', 1, 30, '[]'),
+        ('write_file', 'Write File', 1, 30, '[]'),
+        ('list_files', 'List Files', 1, 30, '[]'),
+        ('apply_diff', 'Apply Diff', 1, 30, '[]'),
+        ('delete_file', 'Delete File', 1, 30, '[]'),
+        ('codebase_search', 'Codebase Search', 1, 30, '[]'),
+        ('search_files', 'Search Files', 1, 30, '[]'),
+    ]
+    for tool_name, display_name, enabled, timeout, permissions in core_tools:
+        await db.execute(
+            "INSERT OR IGNORE INTO tool_config (tool_name, display_name, enabled, timeout_seconds, permissions_json) VALUES (?, ?, ?, ?, ?)",
+            (tool_name, display_name, enabled, timeout, permissions)
+        )
+
+    # Seed example LangChain dynamic tools
+    langchain_tools = [
+        {
+            'name': 'echo_tool',
+            'description': 'Echoes back the input text.',
+            'schema_json': '{"type": "object", "properties": {"text": {"type": "string", "description": "Text to echo"}}, "required": ["text"]}',
+            'handler_type': 'python_function',
+            'handler_config_json': '{"module": "devplane.tools.example", "function": "echo"}',
+            'enabled': 0  # disabled by default, need to implement module
+        },
+        {
+            'name': 'http_placeholder',
+            'description': 'Placeholder for an HTTP endpoint tool.',
+            'schema_json': '{"type": "object", "properties": {"url": {"type": "string", "description": "URL to call"}}, "required": ["url"]}',
+            'handler_type': 'http_endpoint',
+            'handler_config_json': '{"url": "https://api.example.com/tool", "method": "POST"}',
+            'enabled': 0
+        }
+    ]
+    for tool in langchain_tools:
+        await db.execute(
+            """INSERT OR IGNORE INTO langchain_tools
+               (name, description, schema_json, handler_type, handler_config_json, enabled)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (tool['name'], tool['description'], tool['schema_json'], tool['handler_type'],
+             tool['handler_config_json'], tool['enabled'])
+        )
+
+    # Seed MCP servers
+    mcp_servers = [
+        ("llamaindex", "LlamaIndex", "llamaindex"),
+        ("haystack", "Haystack", "haystack"),
+        ("crewai", "CrewAI", "crewai"),
+        ("pydanticai", "PydanticAI", "pydanticai"),
+        ("semantickernel", "Semantic Kernel", "semantickernel"),
+    ]
+    for name, display, server_type in mcp_servers:
+        await db.execute(
+            "INSERT OR IGNORE INTO mcp_servers (name, display_name, server_type, status, enabled, tools_json) VALUES (?, ?, ?, 'offline', 1, '[]')",
+            (name, display, server_type)
+        )
+
+    # Seed default mesh routes for !mesh_route command
+    mesh_routes = [
+        ("search", "haystack", 1),
+        ("find", "haystack", 2),
+        ("document", "llamaindex", 1),
+        ("index", "llamaindex", 2),
+        ("validate", "pydanticai", 1),
+        ("schema", "pydanticai", 2),
+        ("enterprise", "semantickernel", 1),
+        ("logic", "semantickernel", 2),
+        ("crew", "crewai", 1),
+        ("agent", "crewai", 2),
+    ]
+    for keyword, server, priority in mesh_routes:
+        await db.execute(
+            "INSERT OR IGNORE INTO mesh_routes (keyword, mcp_server, priority) VALUES (?, ?, ?)",
+            (keyword, server, priority)
+        )
+
+    # Seed mesh visualization nodes
+    mesh_nodes = [
+        ("component", "planner", 100, 100, '{"label": "Planner", "icon": "📋"}'),
+        ("component", "executor", 300, 100, '{"label": "Executor", "icon": "⚙️"}'),
+        ("component", "reviewer", 500, 100, '{"label": "Reviewer", "icon": "✅"}'),
+        ("component", "judge", 700, 100, '{"label": "Judge", "icon": "🏆"}'),
+        ("mcp_server", "llamaindex", 100, 300, '{"label": "LlamaIndex", "icon": "📚"}'),
+        ("mcp_server", "haystack", 250, 300, '{"label": "Haystack", "icon": "🔍"}'),
+        ("mcp_server", "crewai", 400, 300, '{"label": "CrewAI", "icon": "👔"}'),
+        ("mcp_server", "pydanticai", 550, 300, '{"label": "PydanticAI", "icon": "🛡️"}'),
+        ("mcp_server", "semantickernel", 700, 300, '{"label": "Semantic Kernel", "icon": "🌉"}'),
+    ]
+    for node_type, node_id, x, y, config in mesh_nodes:
+        await db.execute(
+            "INSERT OR IGNORE INTO mesh_visualization (node_type, node_id, position_x, position_y, config_json) VALUES (?, ?, ?, ?, ?)",
+            (node_type, node_id, x, y, config)
+        )
+
     await db.commit()
-    logger.info(f"Seeded default project (id={project_id}), chain (id={chain_id}), 3 tiers, 8 providers")
+    logger.info(f"Seeded default project (id={project_id}), chain (id={chain_id}), 3 tiers, 8 providers, mesh config, MCP servers")
 
 
 # ─── Query Helpers ────────────────────────────────────────────────────────────

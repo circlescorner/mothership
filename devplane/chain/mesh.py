@@ -9,10 +9,60 @@ Uses the role-based model registry for 5-way fallback per step.
 
 import logging
 import time
+import json
 from typing import TypedDict, Optional
 from langgraph.graph import StateGraph, END
+from devplane.db import get_db
 
 logger = logging.getLogger("devplane.chain.mesh")
+
+
+async def get_active_mesh_config():
+    """Fetch the active mesh configuration with role configs."""
+    db = await get_db()
+    try:
+        # Get mesh config
+        row = await db.execute(
+            "SELECT * FROM mesh_configs WHERE is_active = 1 LIMIT 1"
+        )
+        config = await row.fetchone()
+        if not config:
+            # Create default
+            await db.execute("""
+                INSERT INTO mesh_configs (name, execution_mode, mcp_servers_enabled, default_tier, max_iterations, timeout_seconds)
+                VALUES ('Default Mesh', 'tournament', '["llamaindex", "haystack", "crewai", "pydanticai", "semantickernel"]', 'mid', 3, 60)
+            """)
+            await db.commit()
+            row = await db.execute("SELECT * FROM mesh_configs WHERE is_active = 1 LIMIT 1")
+            config = await row.fetchone()
+        
+        # Get role configs
+        role_rows = await db.execute(
+            "SELECT * FROM mesh_role_config WHERE mesh_config_id = ?",
+            (config["id"],)
+        )
+        role_configs = {}
+        async for role_row in role_rows:
+            role_configs[role_row["role_name"]] = {
+                "model_slug": role_row["model_slug"],
+                "iteration_limit": role_row["iteration_limit"],
+                "timeout_seconds": role_row["timeout_seconds"],
+                "config_json": json.loads(role_row["config_json"]) if role_row["config_json"] else {},
+            }
+        
+        return {
+            "id": config["id"],
+            "name": config["name"],
+            "execution_mode": config["execution_mode"],
+            "mcp_servers_enabled": json.loads(config["mcp_servers_enabled"]) if config["mcp_servers_enabled"] else [],
+            "default_tier": config["default_tier"],
+            "max_iterations": config["max_iterations"],
+            "timeout_seconds": config["timeout_seconds"],
+            "config_json": json.loads(config["config_json"]) if config["config_json"] else {},
+            "role_configs": role_configs,
+        }
+    finally:
+        await db.close()
 
 
 # ─── State Schema ────────────────────────────────────────────────────────────
@@ -24,6 +74,7 @@ class MeshState(TypedDict):
     code: str
     feedback: str
     iterations: int
+    max_iterations: int
     is_valid: bool
     project_id: int
     run_id: int
@@ -129,7 +180,7 @@ async def critic_node(state: MeshState) -> dict:
         run_id=state.get("run_id", 0),
     )
 
-    max_iterations = 3
+    max_iterations = state.get("max_iterations", 3)
     is_valid = (
         "LGTM" in result["content"].upper()
         or state.get("iterations", 0) >= max_iterations
@@ -240,6 +291,12 @@ async def run_mesh(
 
     # Run the mesh
     try:
+        # Fetch mesh configuration
+        mesh_config = await get_active_mesh_config()
+        # Use provided max_iterations if different from default, else config value
+        if max_iterations == 3:
+            max_iterations = mesh_config["max_iterations"]
+        
         graph = get_mesh_graph()
         initial_state = {
             "task": task + context,
@@ -247,6 +304,7 @@ async def run_mesh(
             "code": "",
             "feedback": "",
             "iterations": 0,
+            "max_iterations": max_iterations,
             "is_valid": False,
             "project_id": project_id,
             "run_id": run_id,

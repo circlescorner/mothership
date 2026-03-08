@@ -15,6 +15,9 @@ from langchain_core.tools import tool
 from langchain_litellm import ChatLiteLLM
 import subprocess
 import os
+import logging
+import json
+import importlib
 from devplane.infra.mcp import get_mcp_manager
 
 # ─── State Schema ─────────────────────────────────────────────────────────────
@@ -84,14 +87,91 @@ def execute_python(code: str) -> str:
             os.remove(temp_path)
         return f"Failed to execute code: {str(e)}"
 
-# Register core tools
+async def get_enabled_core_tools():
+    """Return list of enabled core tool functions based on tool_config table."""
+    from devplane.db import get_db
+    db = await get_db()
+    try:
+        rows = await db.execute("SELECT tool_name, enabled FROM tool_config WHERE enabled = 1")
+        enabled_tools = [row["tool_name"] for row in await rows.fetchall()]
+    except Exception as e:
+        logger = logging.getLogger("devplane.chain.agent")
+        logger.warning(f"Failed to fetch tool config: {e}")
+        enabled_tools = ["write_file", "read_file", "fetch_url", "execute_python"]  # default all
+    tool_map = {
+        "write_file": write_file,
+        "read_file": read_file,
+        "fetch_url": fetch_url,
+        "execute_python": execute_python,
+        "search_web": None,  # placeholder, not implemented
+        "list_files": None,
+        "apply_diff": None,
+        "delete_file": None,
+        "codebase_search": None,
+        "search_files": None,
+    }
+    # Filter out None (unimplemented) and disabled
+    return [tool_map[name] for name in enabled_tools if name in tool_map and tool_map[name] is not None]
+
+
+async def get_langchain_tools():
+    """Return list of LangChain tools registered in langchain_tools table."""
+    from devplane.db import get_db
+    db = await get_db()
+    try:
+        rows = await db.execute("SELECT * FROM langchain_tools WHERE enabled = 1")
+        tools = []
+        for row in await rows.fetchall():
+            tool = dict(row)
+            # Parse JSON fields
+            schema = json.loads(tool.get("schema_json") or "{}")
+            handler_config = json.loads(tool.get("handler_config_json") or "{}")
+            handler_type = tool.get("handler_type", "python_function")
+            # Create tool based on handler_type
+            if handler_type == "python_function":
+                # Expect module and function in handler_config
+                module_name = handler_config.get("module")
+                func_name = handler_config.get("function")
+                if not module_name or not func_name:
+                    logger = logging.getLogger("devplane.chain.agent")
+                    logger.warning(f"Missing module/function for tool {tool['name']}")
+                    continue
+                try:
+                    module = importlib.import_module(module_name)
+                    func = getattr(module, func_name)
+                except (ImportError, AttributeError) as e:
+                    logger.warning(f"Failed to import {module_name}.{func_name}: {e}")
+                    continue
+                # Create a LangChain tool from the function
+                # Use the existing @tool decorator to wrap
+                from langchain_core.tools import tool
+                # Check if already a tool (has .args_schema etc.)
+                if hasattr(func, "_tool_type"):
+                    # Already a tool
+                    tools.append(func)
+                else:
+                    # Wrap with description
+                    wrapped = tool(func)
+                    tools.append(wrapped)
+            else:
+                # Unsupported handler type, skip
+                logger = logging.getLogger("devplane.chain.agent")
+                logger.warning(f"Unsupported handler type {handler_type} for tool {tool['name']}")
+        return tools
+    except Exception as e:
+        logger = logging.getLogger("devplane.chain.agent")
+        logger.warning(f"Failed to fetch langchain tools: {e}")
+        return []
+# Register core tools (all defined tools, filtering happens in dynamic_tool_node)
 agent_tools = [write_file, read_file, fetch_url, execute_python]
 
 async def dynamic_tool_node(state: AgentState) -> dict:
     """Dynamically loads and executes tools including MCP capabilities."""
     from devplane.infra.mcp import get_mcp_manager
     mcp_manager = get_mcp_manager()
-    all_tools = agent_tools + mcp_manager.get_agent_tools()
+    enabled_core_tools = await get_enabled_core_tools()
+    langchain_tools = await get_langchain_tools()
+    all_tools = enabled_core_tools + mcp_manager.get_agent_tools() + langchain_tools
     
     # We create a temporary ToolNode mapped to the current combined tools
     node = ToolNode(all_tools)

@@ -41,6 +41,12 @@ Mothership Optimized is a production-ready control plane for AI agent chains wit
    - **Langflow & Flowise**: Visual chain configuration
    - **Langfuse**: Real-time execution tracing
 
+7. **Mesh Configuration Dashboard** - Unified Agentic Mesh management
+   - Visual configuration of MCP servers, execution modes, and tournament brackets
+   - Real-time mesh visualization and routing rules
+   - Deployment wizard for infrastructure provisioning
+   - Secrets management for secure credential storage
+
 ## Current Configuration
 
 ### Free AI Providers
@@ -86,6 +92,15 @@ python -m uvicorn main:app --port 8000 --reload
 - `GET /api/infra/status` - Infrastructure status
 - `GET /api/credits/summary` - Spending overview
 - `GET /api/optimizer/insights` - Performance analytics
+- `GET /api/mesh/config` - Get mesh configuration
+- `PUT /api/mesh/config` - Update mesh configuration
+- `GET /api/mesh/servers` - List MCP server status
+- `GET /api/mesh/visualize` - Mesh visualization data
+- `GET /api/mesh/tournaments` - Tournament history
+- `GET /api/deploy/detect` - Detect environment
+- `POST /api/deploy` - Save deployment configuration
+- `GET /api/secrets` - List secrets (masked)
+- `POST /api/secrets` - Update a secret
 
 ### Running a Chain
 ```bash

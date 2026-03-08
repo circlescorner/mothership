@@ -46,11 +46,15 @@ function navigate(page) {
         credits: 'Credits & Budgets',
         projects: 'Projects',
         history: 'Run History',
+        deploy: 'Deployment Wizard',
+        secrets: 'Secrets Management',
+        meshconfig: 'Mesh Configuration',
     }[page] || 'Dashboard';
 
     // Load page-specific data
     const loaders = {
         dashboard: loadDashboard,
+        mesh: loadMesh,
         providers: loadProviders,
         credits: loadCredits,
         chains: loadChains,
@@ -58,6 +62,9 @@ function navigate(page) {
         history: loadHistory,
         infra: loadInfra,
         memory: loadMemory,
+        deploy: loadDeploy,
+        secrets: loadSecrets,
+        meshconfig: loadMeshConfig,
     };
     if (loaders[page]) loaders[page]();
 }
@@ -98,6 +105,144 @@ function setBudgetBar(period, spent, budget) {
         fill.className = `budget-bar-fill ${pct > 90 ? 'danger' : pct > 70 ? 'warning' : ''}`;
     }
     if (value) value.textContent = `$${spent.toFixed(2)} / $${budget.toFixed(2)}`;
+}
+
+// ─── Mesh Page ──────────────────────────────────────────────────────────────
+
+async function loadMesh() {
+    try {
+        const [config, servers, routes, visualization, tournaments] = await Promise.all([
+            API.get('/api/mesh/config'),
+            API.get('/api/mesh/servers'),
+            API.get('/api/mesh/routes'),
+            API.get('/api/mesh/visualize'),
+            API.get('/api/mesh/tournaments'),
+        ]);
+
+        // Set config values
+        const modeSelect = document.getElementById('mesh-mode');
+        const tierSelect = document.getElementById('mesh-tier');
+        const iterInput = document.getElementById('mesh-iterations');
+        if (modeSelect) modeSelect.value = config.execution_mode || 'tournament';
+        if (tierSelect) tierSelect.value = config.default_tier || 'mid';
+        if (iterInput) iterInput.value = config.max_iterations || 3;
+
+        // Render MCP servers
+        const serversContainer = document.getElementById('mcp-servers-list');
+        if (serversContainer) {
+            serversContainer.innerHTML = servers.map(s => `
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border)">
+                    <div>
+                        <strong>${s.display_name}</strong>
+                        <span class="badge ${s.status === 'online' ? 'badge-success' : s.status === 'error' ? 'badge-danger' : ''}" style="margin-left:8px">${s.status}</span>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" ${s.enabled ? 'checked' : ''} onchange="toggleMCPServer('${s.name}', this.checked)">
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            `).join('');
+        }
+
+        // Render mesh visualization
+        const visContainer = document.getElementById('mesh-visualization');
+        if (visContainer && visualization.nodes) {
+            renderMeshVisualization(visContainer, visualization);
+        }
+
+        // Render routes
+        const routesContainer = document.getElementById('mesh-routes-list');
+        if (routesContainer) {
+            routesContainer.innerHTML = routes.length ? routes.map(r => `
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:13px">
+                    <span><code style="background:var(--bg-elevated);padding:2px 6px;border-radius:4px">${r.keyword}</code></span>
+                    <span style="color:var(--text-dim)">→</span>
+                    <span>${r.mcp_server}</span>
+                </div>
+            `).join('') : '<div style="color:var(--text-dim)">No routes configured</div>';
+        }
+
+        // Render tournament history
+        const tourneyContainer = document.getElementById('tournament-history');
+        if (tourneyContainer) {
+            tourneyContainer.innerHTML = tournaments.length ? tournaments.slice(0, 5).map(t => `
+                <div style="padding:8px 0;border-bottom:1px solid var(--border);font-size:13px">
+                    <div style="display:flex;justify-content:space-between">
+                        <span class="badge">${t.winning_tier || 'N/A'}</span>
+                        <span style="color:var(--text-dim)">$${(t.total_cost || 0).toFixed(4)}</span>
+                    </div>
+                    <div style="color:var(--text-dim);margin-top:4px;font-size:11px">${truncate(t.prompt, 50)}</div>
+                </div>
+            `).join('') : '<div style="color:var(--text-dim)">No tournaments yet</div>';
+        }
+    } catch (e) {
+        console.error('Mesh load error:', e);
+    }
+}
+
+function renderMeshVisualization(container, data) {
+    const width = container.clientWidth || 800;
+    const height = 400;
+    
+    let html = `<svg width="${width}" height="${height}" style="background:var(--bg-elevated)">`;
+    
+    // Draw edges
+    if (data.edges) {
+        data.edges.forEach(edge => {
+            const fromNode = data.nodes.find(n => n.node_id === edge.from);
+            const toNode = data.nodes.find(n => n.node_id === edge.to);
+            if (fromNode && toNode) {
+                html += `<line x1="${fromNode.position_x + 40}" y1="${fromNode.position_y + 25}" x2="${toNode.position_x}" y2="${toNode.position_y + 25}" stroke="var(--border)" stroke-width="2" stroke-dasharray="5,5"/>`;
+            }
+        });
+    }
+    
+    // Draw nodes
+    if (data.nodes) {
+        data.nodes.forEach(node => {
+            const config = node.config_json || {};
+            const icon = config.icon || '🔗';
+            const label = config.label || node.node_id;
+            const isComponent = node.node_type === 'component';
+            const color = isComponent ? 'var(--accent)' : 'var(--text-dim)';
+            
+            html += `
+                <g transform="translate(${node.position_x}, ${node.position_y})">
+                    <rect width="80" height="50" rx="8" fill="var(--bg-card)" stroke="${color}" stroke-width="2"/>
+                    <text x="40" y="20" text-anchor="middle" fill="var(--text-main)" font-size="20">${icon}</text>
+                    <text x="40" y="40" text-anchor="middle" fill="var(--text-dim)" font-size="10">${label}</text>
+                </g>
+            `;
+        });
+    }
+    
+    html += '</svg>';
+    container.innerHTML = html;
+}
+
+async function saveMeshConfig() {
+    const mode = document.getElementById('mesh-mode').value;
+    const tier = document.getElementById('mesh-tier').value;
+    const iterations = parseInt(document.getElementById('mesh-iterations').value);
+    
+    try {
+        await API.put('/api/mesh/config', {
+            execution_mode: mode,
+            default_tier: tier,
+            max_iterations: iterations
+        });
+        alert('Mesh configuration saved!');
+    } catch (e) {
+        alert('Failed to save: ' + e.message);
+    }
+}
+
+async function toggleMCPServer(name, enabled) {
+    try {
+        await API.put(`/api/mesh/servers/${name}`, { enabled });
+    } catch (e) {
+        alert('Failed to update server: ' + e.message);
+    }
 }
 
 // ─── Providers Page ─────────────────────────────────────────────────────────
@@ -512,6 +657,28 @@ async function loadMemory() {
         }
     } catch (e) {
         console.error('Memory load error:', e);
+    }
+}
+
+async function loadDeploy() {
+    // Iframe will auto‑load /deploy; optionally refresh iframe on navigation
+    const iframe = document.querySelector('#page-deploy iframe');
+    if (iframe && iframe.contentWindow) {
+        // Optionally reload iframe each time page is shown
+        // iframe.src = iframe.src;
+    }
+}
+
+async function loadSecrets() {
+    // Iframe will auto‑load /secrets
+}
+
+async function loadMeshConfig() {
+    // Iframe will auto‑load /mesh
+    const iframe = document.querySelector('#page-meshconfig iframe');
+    if (iframe && iframe.contentWindow) {
+        // Optionally reload iframe each time page is shown
+        // iframe.src = iframe.src;
     }
 }
 

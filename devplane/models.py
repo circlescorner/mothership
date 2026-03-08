@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Any
 from datetime import datetime
 from enum import Enum
 
@@ -181,6 +181,46 @@ class CreditSummary(BaseModel):
     by_provider: dict[str, float] = Field(default_factory=dict)
     provider_limits: dict[str, float] = Field(default_factory=dict)
 
+
+# ─── Mesh Configuration ──────────────────────────────────────────────────────
+
+class MeshConfig(BaseModel):
+    """Mesh global configuration."""
+    id: Optional[int] = None
+    name: str = "Default Mesh"
+    execution_mode: str = "tournament"
+    mcp_servers_enabled: list[str] = Field(default_factory=lambda: ["llamaindex", "haystack", "crewai", "pydanticai", "semantickernel"])
+    default_tier: str = "mid"
+    max_iterations: int = 3
+    timeout_seconds: int = 60
+    config_json: dict[str, Any] = Field(default_factory=dict)
+    is_active: bool = True
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class MeshRoleConfig(BaseModel):
+    """Per-role configuration within a mesh."""
+    id: Optional[int] = None
+    mesh_config_id: int
+    role_name: str
+    model_slug: Optional[str] = None
+    iteration_limit: Optional[int] = None
+    timeout_seconds: int = 60
+    config_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class LangchainTool(BaseModel):
+    """LangChain tool registration."""
+    id: Optional[int] = None
+    name: str
+    description: Optional[str] = None
+    schema_json: str = "{}"
+    handler_type: str
+    handler_config_json: str = "{}"
+    enabled: bool = True
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 class HealthStatus(BaseModel):
     status: str = "online"

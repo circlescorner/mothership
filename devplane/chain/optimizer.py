@@ -11,6 +11,30 @@ from devplane.db import get_db
 logger = logging.getLogger("devplane.chain.optimizer")
 
 
+async def get_optimizer_config():
+    """Fetch optimizer configuration from database."""
+    db = await get_db()
+    try:
+        row = await db.execute("SELECT * FROM optimizer_config WHERE id = 1")
+        config = await row.fetchone()
+        if config:
+            return {
+                "complexity_threshold": config["complexity_threshold"] or 0.5,
+                "scoring_weights_json": json.loads(config["scoring_weights_json"] or '{"accuracy": 0.4, "cost": 0.3, "speed": 0.3}'),
+                "max_iterations": config["max_iterations"] or 3,
+                "timeout_seconds": config["timeout_seconds"] or 30,
+            }
+    except Exception as e:
+        logger.warning(f"Failed to fetch optimizer config: {e}")
+    # Fallback defaults
+    return {
+        "complexity_threshold": 0.5,
+        "scoring_weights_json": {"accuracy": 0.4, "cost": 0.3, "speed": 0.3},
+        "max_iterations": 3,
+        "timeout_seconds": 30,
+    }
+
+
 async def record_step_performance(model_slug: str, step_type: str,
                                    cost: float, duration_ms: int,
                                    quality: float = 0.0):
@@ -53,6 +77,11 @@ async def recommend_tier(prompt: str) -> dict:
     Simple heuristic: longer/more complex prompts → higher tier.
     Over time, learns from past results which tier works best.
     """
+    config = await get_optimizer_config()
+    complexity_threshold = config.get("complexity_threshold", 0.5)
+    cheap_threshold = complexity_threshold * 0.8   # adjust as needed
+    mid_threshold = complexity_threshold * 1.3
+    
     words = len(prompt.split())
     has_code = any(kw in prompt.lower() for kw in ["code", "function", "class", "debug", "implement", "algorithm", "api"])
     has_analysis = any(kw in prompt.lower() for kw in ["analyze", "compare", "evaluate", "research", "explain in detail"])
@@ -67,10 +96,10 @@ async def recommend_tier(prompt: str) -> dict:
     if has_analysis:
         complexity_score += 0.15
 
-    if complexity_score < 0.4:
+    if complexity_score < cheap_threshold:
         tier = "cheap"
         reason = "Simple prompt — cheap tier should handle this well"
-    elif complexity_score < 0.65:
+    elif complexity_score < mid_threshold:
         tier = "mid"
         reason = "Moderate complexity — mid tier recommended for balanced cost/quality"
     else:

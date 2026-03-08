@@ -26,6 +26,13 @@ DevPlane provides a "single pane of glass" for configuring and monitoring your A
 *   **Flowise**: Alternative visual builder available at `http://localhost:3001`
 *   **Langfuse**: Real-time execution tracing and observability available at `http://localhost:3002`
 
+### Dashboard UI
+The DevPlane web dashboard (`http://localhost:8000`) provides a comprehensive interface for managing the Agentic Mesh, infrastructure, and secrets:
+*   **Agentic Mesh Configuration**: Configure execution modes (tournament, mesh, agent), MCP server status, and routing rules.
+*   **Deployment Wizard**: Guided setup for provisioning DigitalOcean droplets, configuring Cloudflare DNS, and setting up API keys.
+*   **Secrets Management**: Securely store and rotate API keys, tokens, and environment variables.
+*   **Real-time Monitoring**: Live metrics on provider usage, budget consumption, and system health.
+
 ### Infrastructure Management (CloudOps)
 You can control the physical servers powering your dev environments via Slack Block Kit interactive buttons or commands (coming soon):
 *   `!spinup worker` - Instantiates an ephemeral DigitalOcean droplet for temporary compute.

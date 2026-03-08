@@ -702,6 +702,18 @@ async def get_current_user(request: Request) -> dict:
     
     return user
 
+async def require_auth(request: Request) -> dict:
+    """Require authentication for a route."""
+    session_id = request.cookies.get(SESSION_COOKIE_NAME)
+    if not session_id:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    session = await get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=401, detail="Invalid or expired session")
+    
+    return session
+
 async def require_mfa(user: dict = Depends(get_current_user)) -> dict:
     """Require MFA to be enabled for the user."""
     if not user.get("mfa_enabled"):

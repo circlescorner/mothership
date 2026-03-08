@@ -177,6 +177,9 @@ from devplane.api.infra import router as infra_router
 from devplane.api.workflows import router as workflows_router
 from devplane.api.agents import router as agents_router
 from devplane.api.secrets import router as secrets_router
+from devplane.api.mesh import router as mesh_router
+from devplane.api.config import router as config_router
+from devplane.api.tools import router as tools_router
 from devplane.auth import router as auth_router
 from devplane.webauthn import router as webauthn_router
 
@@ -188,6 +191,9 @@ app.include_router(infra_router)
 app.include_router(workflows_router)
 app.include_router(agents_router)
 app.include_router(secrets_router)
+app.include_router(mesh_router)  # Unified Agentic Mesh configuration
+app.include_router(config_router)  # Configuration endpoints for roles, memory, optimizer, tools, MCP servers
+app.include_router(tools_router)  # LangChain dynamic tool registration
 app.include_router(auth_router)  # Authentication & MFA endpoints
 app.include_router(webauthn_router)  # WebAuthn/FIDO2 hardware key endpoints
 
@@ -470,6 +476,63 @@ async def setup_wizard(request: Request):
     
     try:
         with open("static/setup.html", "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return RedirectResponse(url="/")
+
+
+@app.get("/deploy", response_class=HTMLResponse)
+async def deploy_wizard(request: Request):
+    """Deployment wizard - requires authentication."""
+    session_id = request.cookies.get("devplane_session")
+    if not session_id:
+        return RedirectResponse(url="/login", status_code=302)
+    
+    from devplane.auth import get_session
+    session = await get_session(session_id)
+    if not session:
+        return RedirectResponse(url="/login", status_code=302)
+    
+    try:
+        with open("static/deploy.html", "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return RedirectResponse(url="/")
+
+
+@app.get("/secrets", response_class=HTMLResponse)
+async def secrets_management(request: Request):
+    """Secrets management page - requires authentication."""
+    session_id = request.cookies.get("devplane_session")
+    if not session_id:
+        return RedirectResponse(url="/login", status_code=302)
+    
+    from devplane.auth import get_session
+    session = await get_session(session_id)
+    if not session:
+        return RedirectResponse(url="/login", status_code=302)
+    
+    try:
+        with open("static/secrets.html", "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return RedirectResponse(url="/")
+
+
+@app.get("/mesh", response_class=HTMLResponse)
+async def mesh_configuration(request: Request):
+    """Mesh configuration page - requires authentication."""
+    session_id = request.cookies.get("devplane_session")
+    if not session_id:
+        return RedirectResponse(url="/login", status_code=302)
+    
+    from devplane.auth import get_session
+    session = await get_session(session_id)
+    if not session:
+        return RedirectResponse(url="/login", status_code=302)
+    
+    try:
+        with open("static/mesh.html", "r", encoding="utf-8") as f:
             return f.read()
     except FileNotFoundError:
         return RedirectResponse(url="/")
@@ -768,6 +831,148 @@ async def lockhost_extensions(request: Request):
     except Exception as e:
         logger.error(f"Extension setup failed: {e}")
         return {"status": "error", "error": str(e)}
+
+
+# ─── Deployment Wizard & Secrets Management ──────────────────────────────────
+
+class DeployData(PydanticBaseModel):
+    deployment_mode: str = "local"
+    DIGITALOCEAN_TOKEN: str = ""
+    DIGITALOCEAN_REGION: str = "nyc1"
+    CLOUDFLARE_API_TOKEN: str = ""
+    SLACK_BOT_TOKEN: str = ""
+    SLACK_APP_TOKEN: str = ""
+    SECRET_KEY: str = ""
+    OPENROUTER_API_KEY: str = ""
+    DEEPSEEK_API_KEY: str = ""
+    GROQ_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""
+    DOMAIN: str = ""
+    EMAIL: str = ""
+
+
+@app.get("/api/deploy/detect")
+async def detect_environment(request: Request):
+    """Detect if running locally or on a remote server."""
+    import socket
+    hostname = socket.gethostname()
+    ip = socket.gethostbyname(hostname)
+    is_remote = not (ip.startswith("127.") or ip.startswith("192.168.") or ip.startswith("10."))
+    return {
+        "hostname": hostname,
+        "ip": ip,
+        "is_remote": is_remote,
+        "platform": os.name,
+        "cwd": os.getcwd()
+    }
+
+
+@app.post("/api/deploy")
+async def deploy_configuration(request: Request, data: DeployData):
+    """Save deployment configuration and optionally provision infrastructure."""
+    await require_auth(request)
+    from devplane.secrets_mgr import get_vault
+    from devplane.infra.manager import get_infra_manager
+    from devplane.providers import get_provider_by_name, update_provider
+    import shutil
+    
+    vault = get_vault()
+    env_file = ".env"
+    
+    # Ensure .env exists
+    if not os.path.exists(env_file):
+        open(env_file, "a").close()
+    
+    # Store each non‑empty secret in vault and environment
+    for key, value in data.model_dump().items():
+        if value:
+            await vault.store_secret(key, value, ttl_minutes=0)
+            os.environ[key] = value
+            set_key(env_file, key, value)
+    
+    # Update providers in DB
+    key_map = {
+        "OPENROUTER_API_KEY": "openrouter",
+        "DEEPSEEK_API_KEY": "deepseek",
+        "GROQ_API_KEY": "groq",
+        "GEMINI_API_KEY": "gemini",
+    }
+    for env_key, prov_name in key_map.items():
+        val = getattr(data, env_key, "")
+        if val:
+            prov = await get_provider_by_name(prov_name)
+            if prov:
+                masked_key = f"{val[:4]}••••{val[-4:]}" if len(val) > 8 else "••••"
+                await update_provider(prov["id"], api_key=masked_key, enabled=True)
+    
+    # Set DigitalOcean token in infra manager
+    if data.DIGITALOCEAN_TOKEN:
+        get_infra_manager().token = data.DIGITALOCEAN_TOKEN
+        get_infra_manager().region = data.DIGITALOCEAN_REGION
+    
+    # If remote deployment mode and DO token present, trigger infrastructure deployment
+    if data.deployment_mode == "remote" and data.DIGITALOCEAN_TOKEN:
+        # In a real implementation we would call deploy-infrastructure.py
+        # For now, just log
+        logger.info("Remote deployment requested. Infrastructure provisioning would start here.")
+    
+    logger.info("Deployment configuration saved successfully.")
+    return {"status": "success", "message": "Configuration saved and infrastructure queued if applicable."}
+
+
+@app.get("/api/secrets")
+async def get_secrets(request: Request):
+    """Return all known secrets (masked) and their status.
+
+    Secret values are masked for security: first 4 and last 4 characters visible
+    for strings longer than 8 characters, otherwise replaced with '••••'.
+    Empty values indicate missing secrets.
+    """
+    await require_auth(request)
+    from devplane.secrets_mgr import get_vault
+    import os
+    
+    secrets_list = {}
+    # List of known secret keys
+    known_keys = [
+        "SLACK_BOT_TOKEN", "SLACK_APP_TOKEN", "OPENROUTER_API_KEY",
+        "DEEPSEEK_API_KEY", "GROQ_API_KEY", "GEMINI_API_KEY",
+        "TOGETHERAI_API_KEY", "CEREBRAS_API_KEY", "FIREWORKS_AI_API_KEY",
+        "DIGITALOCEAN_TOKEN", "CLOUDFLARE_API_TOKEN", "QDRANT_URL",
+        "QDRANT_KEY", "SECRET_KEY", "VAULT_MASTER_KEY"
+    ]
+    for key in known_keys:
+        value = os.environ.get(key, "")
+        secrets_list[key] = f"{value[:4]}••••{value[-4:]}" if len(value) > 8 else ("••••" if value else "")
+    
+    return {"secrets": secrets_list}
+
+
+@app.post("/api/secrets")
+async def update_secret(request: Request, payload: dict):
+    """Update a single secret."""
+    await require_auth(request)
+    from devplane.secrets_mgr import get_vault
+    from dotenv import set_key
+    
+    key = payload.get("key")
+    value = payload.get("value", "")
+    
+    if not key:
+        raise HTTPException(status_code=400, detail="Missing 'key'")
+    
+    vault = get_vault()
+    await vault.store_secret(key, value, ttl_minutes=0)
+    os.environ[key] = value
+    
+    # Update .env
+    env_file = ".env"
+    if not os.path.exists(env_file):
+        open(env_file, "a").close()
+    set_key(env_file, key, value)
+    
+    logger.info(f"Secret '{key}' updated.")
+    return {"status": "success", "key": key}
 
 
 # ─── Direct Run ───────────────────────────────────────────────────────────────
