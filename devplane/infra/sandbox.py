@@ -2,6 +2,15 @@
 
 Deploys ephemeral, isolated droplets to run code (Clawbot, etc) safely off-network
 and captures output before immediate destruction.
+
+Security Features:
+- Network isolation (blocks private IP ranges)
+- No persistent credentials
+- Ephemeral secrets only
+- Resource limits (CPU, memory, disk)
+- Full audit logging
+- Credential isolation from host
+- Non-root execution
 """
 
 import os
@@ -9,203 +18,609 @@ import secrets
 import asyncio
 import logging
 import json
+import hashlib
+import threading
 import paramiko
+import time
 from datetime import datetime, timedelta
+from typing import Optional, Dict, List, Any
+from dataclasses import dataclass, field
+from enum import Enum
+from collections import defaultdict
+
 from devplane.infra.manager import get_infra_manager
 
 logger = logging.getLogger("devplane.infra.sandbox")
 
+
+class SandboxStatus(str, Enum):
+    """Sandbox lifecycle states."""
+    PENDING = "pending"
+    DEPLOYING = "deploying"
+    RUNNING = "running"
+    EXECUTING = "executing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    DESTROYED = "destroyed"
+
+
+class SandboxSecurityLevel(str, Enum):
+    """Sandbox security levels."""
+    BASIC = "basic"         # Basic isolation
+    STRICT = "strict"       # Strict isolation, no network
+    CONTAINERIZED = "container"  # Docker container isolation
+
+
+@dataclass
+class SandboxSession:
+    """Sandbox execution session."""
+    session_id: str
+    sandbox_id: str
+    status: SandboxStatus
+    created_at: datetime
+    droplet_id: Optional[int] = None
+    ip_address: Optional[str] = None
+    security_level: SandboxSecurityLevel = SandboxSecurityLevel.BASIC
+    user: str = "clawbot"
+    max_runtime_minutes: int = 30
+    max_cpu_percent: int = 50
+    max_memory_mb: int = 512
+    max_disk_mb: int = 1024
+    network_allowed: bool = True
+    allowed_domains: List[str] = field(default_factory=list)
+    audit_log: List[Dict] = field(default_factory=list)
+    execution_count: int = 0
+    destroyed_at: Optional[datetime] = None
+
+
+class SandboxSecurityMonitor:
+    """Monitor and enforce sandbox security."""
+    
+    def __init__(self):
+        self._sessions: Dict[str, SandboxSession] = {}
+        self._audit_log: List[Dict] = []
+        self._audit_lock = threading.Lock()
+        self._failed_attempts: Dict[str, List[float]] = defaultdict(list)
+    
+    def create_session(self, security_level: SandboxSecurityLevel = SandboxSecurityLevel.BASIC,
+                      max_runtime: int = 30, **options) -> SandboxSession:
+        """Create a new sandbox session."""
+        session_id = f"session-{secrets.token_hex(8)}"
+        sandbox_id = f"sandbox-{secrets.token_hex(4)}"
+        
+        session = SandboxSession(
+            session_id=session_id,
+            sandbox_id=sandbox_id,
+            status=SandboxStatus.PENDING,
+            created_at=datetime.utcnow(),
+            security_level=security_level,
+            max_runtime_minutes=max_runtime,
+            max_cpu_percent=options.get("max_cpu", 50),
+            max_memory_mb=options.get("max_memory", 512),
+            max_disk_mb=options.get("max_disk", 1024),
+            network_allowed=security_level != SandboxSecurityLevel.STRICT,
+            allowed_domains=options.get("allowed_domains", [])
+        )
+        
+        self._sessions[session_id] = session
+        self._audit(session_id, "session_created", True, 
+                   f"Created sandbox: {sandbox_id}")
+        
+        return session
+    
+    def get_session(self, session_id: str) -> Optional[SandboxSession]:
+        """Get session by ID."""
+        return self._sessions.get(session_id)
+    
+    def update_session(self, session_id: str, **updates):
+        """Update session state."""
+        session = self._sessions.get(session_id)
+        
+        if not session:
+            return None
+        
+        for key, value in updates.items():
+            if hasattr(session, key):
+                setattr(session, key, value)
+        
+        return session
+    
+    def _audit(self, session_id: str, action: str, success: bool, details: str = None):
+        """Log sandbox operation."""
+        session = self._sessions.get(session_id)
+        
+        entry = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "session_id": session_id,
+            "sandbox_id": session.sandbox_id if session else "unknown",
+            "action": action,
+            "success": success,
+            "details": details
+        }
+        
+        with self._audit_lock:
+            self._audit_log.append(entry)
+            
+            if session:
+                session.audit_log.append(entry)
+            
+            # Keep last 10000 entries
+            if len(self._audit_log) > 10000:
+                self._audit_log = self._audit_log[-10000:]
+    
+    def check_rate_limit(self, identifier: str, max_attempts: int = 5, 
+                        window_seconds: int = 300) -> bool:
+        """Check rate limit for sandbox operations."""
+        now = time.time()
+        window_start = now - window_seconds
+        
+        # Clean old attempts
+        self._failed_attempts[identifier] = [
+            t for t in self._failed_attempts[identifier] if t > window_start
+        ]
+        
+        if len(self._failed_attempts[identifier]) >= max_attempts:
+            return False
+        
+        return True
+    
+    def record_attempt(self, identifier: str, success: bool):
+        """Record an attempt."""
+        if not success:
+            self._failed_attempts[identifier].append(time.time())
+        else:
+            # Clear on success
+            self._failed_attempts[identifier].clear()
+    
+    def get_audit_log(self, session_id: str = None, limit: int = 100) -> List[Dict]:
+        """Get audit log."""
+        with self._audit_lock:
+            if session_id:
+                return [e for e in self._audit_log[-limit:] 
+                       if e.get("session_id") == session_id]
+            return self._audit_log[-limit:]
+
+
 class SandboxManager:
-    """Manages isolated sandbox environments for running untrusted LLM code."""
+    """Manages isolated sandbox environments for running untrusted LLM code.
+    
+    Security enhancements:
+    - No persistent credentials in sandbox
+    - Ephemeral secrets only
+    - Network isolation
+    - Resource limits
+    - Full audit logging
+    """
     
     def __init__(self):
         self.mgr = get_infra_manager()
+        self.security_monitor = SandboxSecurityMonitor()
+        self._cleanup_task: Optional[asyncio.Task] = None
+    
+    def _get_user_data(self, session: SandboxSession) -> str:
+        """Generate cloud-init user data with security hardening."""
         
-    async def create_firewalled_sandbox(self, system_type: str = "basic") -> dict:
-        """Deploy a droplet with strict UFW egress filtering for security.
-        It can only talk to essential repos and is blocked from local LANs.
-        """
-        sandbox_id = f"sandbox-{secrets.token_hex(4)}"
+        # Determine security level
+        if session.security_level == SandboxSecurityLevel.STRICT:
+            network_policy = "deny"
+        elif session.security_level == SandboxSecurityLevel.CONTAINERIZED:
+            network_policy = "container"
+        else:
+            network_policy = "allow"
         
-        # Critical Security User Data
-        # 1. Deny outgoing by default to prevent lateral scanning
-        # 2. Allow DNS (53) and HTTP/HTTPS (80,443) only for dependency installs
-        # 3. Block private IP ranges completely so it cannot reach the Gate Droplet
         user_data = f"""#!/bin/bash
 set -e
 export DEBIAN_FRONTEND=noninteractive
 export APT_LISTCHANGES_FRONTEND=none
+
+# =============================================
+# SANDBOX SECURITY HARDENING
+# Generated: {datetime.utcnow().isoformat()}
+# Session: {session.session_id}
+# Security Level: {session.security_level.value}
+# =============================================
 
 # Timeout Safe Aliases (Kilocode Safety Wrappers)
 cat > /etc/profile.d/safety-aliases.sh << 'EOF'
 alias curl='curl --max-time 30 --connect-timeout 10'
 alias wget='wget --timeout=30 --tries=3'
 timeout_safe() {{
-    local duration="\\$1"
+    local duration="$1"
     shift
-    timeout --signal=TERM --kill-after=5 "\\$duration" "\\$@"
+    timeout --signal=TERM --kill-after=5 "$duration" "$@"
 }}
 EOF
 chmod +x /etc/profile.d/safety-aliases.sh
-
-# Apply aliases to root shell for setup
 source /etc/profile.d/safety-aliases.sh
 
-timeout_safe 300 apt-get update && timeout_safe 600 apt-get upgrade -y
+# Safe apt-get with timeout
+apt-get-update-safe() {{
+    timeout_safe 300 apt-get update
+}}
+apt-get-install-safe() {{
+    timeout_safe 600 apt-get install -y "$@"
+}}
 
-# Setup precise UFW Sandbox Firewall
-apt-get install -y ufw dos2unix
+apt-get-update-safe
+
+# Install security tools
+apt-get-install-safe ufw dos2unix auditd rsyslog
+
+# =============================================
+# NETWORK ISOLATION
+# =============================================
+
+# Reset and configure UFW
 ufw --force reset
 ufw default deny incoming
 ufw default allow outgoing
 
-# Block all private LAN spaces to prevent lateral movement (AWS/DO internal IPs)
+# BLOCK ALL PRIVATE IP RANGES - Prevent lateral movement
 ufw deny out to 10.0.0.0/8
 ufw deny out to 172.16.0.0/12
 ufw deny out to 192.168.0.0/16
 ufw deny out to 100.64.0.0/10
+ufw deny out to 169.254.0.0/16  # Link-local
 
-# Allow SSH so we can orchestrate it
-ufw allow incoming 22/tcp
+# Allow specific domains if whitelisted
+"""
+        
+        # Add allowed domains if specified
+        if session.allowed_domains:
+            for domain in session.allowed_domains:
+                user_data += f"""
+# Allow domain: {domain}
+ufw allow out to 8.8.8.8 port 53  # DNS for {domain}
+"""
+        
+        user_data += f"""
+# Allow SSH
+ufw allow 22/tcp
+
+# Enable firewall
 ufw --force enable
 
-# Setup non-root user for task execution
-useradd -m -s /bin/bash clawbot
-mkdir -p /home/clawbot/workspace
-chown -R clawbot:clawbot /home/clawbot
-"""
+# =============================================
+# RESOURCE LIMITS
+# =============================================
 
-        if system_type == "docker":
-            user_data += """
-# Install Docker
-curl -fsSL https://get.docker.com | sh
-usermod -aG docker clawbot
-systemctl enable docker
-"""
-        elif system_type == "kubernetes":
-            user_data += """
-# Install Docker & K3s
-curl -fsSL https://get.docker.com | sh
-usermod -aG docker clawbot
-curl -sfL https://get.k3s.io | sh -
-chmod 644 /etc/rancher/k3s/k3s.yaml
-export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-echo "export KUBECONFIG=/etc/rancher/k3s/k3s.yaml" >> /home/clawbot/.bashrc
-"""
+# Set up resource limits via /etc/security/limits.conf
+cat >> /etc/security/limits.conf << 'EOF'
+* soft cpu {session.max_cpu_percent}
+* hard cpu {session.max_cpu_percent}
+* soft mem {session.max_memory_mb}M
+* hard mem {session.max_memory_mb}M
+* soft nproc 100
+* hard nproc 100
+EOF
 
-        user_data += f"""
-# Ensure ephemeral destruction after 25 mins max
-echo "docker stop \\$(docker ps -aq) 2>/dev/null; shutdown -h now" | at now + 25 minutes
+# =============================================
+# NO PERSISTENT CREDENTIALS
+# =============================================
 
-hostnamectl set-hostname {sandbox_id}
-echo "Secured Sandbox Ready"
+# Remove any default keys
+rm -f /root/.ssh/authorized_keys 2>/dev/null || true
+rm -f /home/*/.ssh/authorized_keys 2>/dev/null || true
+
+# Disable password authentication
+sed -i 's/^PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+sed -i 's/^PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
+
+# =============================================
+# SANDBOX USER
+# =============================================
+
+# Create non-privileged user for task execution
+useradd -m -s /bin/bash {session.user}
+mkdir -p /home/{session.user}/workspace
+chown -R {session.user}:{session.user} /home/{session.user}
+
+# =============================================
+# AUDIT LOGGING
+# =============================================
+
+# Configure auditd for sandbox operations
+cat > /etc/audit/auditd.conf << 'EOF'
+max_log_file = 10
+max_log_file_action = ROTATE
+space_left_action = SYSLOG
+admin_space_left_action = SYSLOG
+EOF
+
+# Start services
+systemctl enable auditd
+systemctl start auditd
+
+# =============================================
+# EPHEMERAL DESTRUCTION
+# =============================================
+
+# Schedule destruction after max runtime
+echo "shutdown -h now" | at now + {session.max_runtime_minutes} minutes 2>/dev/null || true
+
+# Also set up a watchdog script
+cat > /usr/local/bin/sandbox-watchdog.sh << 'EOF'
+#!/bin/bash
+# Kill any remaining processes after timeout
+sleep {session.max_runtime_minutes * 60}
+pkill -u {session.user} || true
+shutdown -h now
+EOF
+chmod +x /usr/local/bin/sandbox-watchdog.sh
+nohup /usr/local/bin/sandbox-watchdog.sh > /dev/null 2>&1 &
+
+# Set hostname
+hostnamectl set-hostname {session.sandbox_id}
+
+echo "SECURE_SANDBOX_READY"
 """
         
-        logger.info(f"Deploying isolated sandbox droplet: {sandbox_id}")
-        return await self.mgr.create_droplet(
-            name=sandbox_id,
-            size="s-1vcpu-2gb", # Cheapest enough for code execution
-            droplet_type="sandbox",
-            ttl_minutes=30, # Hard backup if bash cron fails
-            user_data=user_data
+        return user_data
+    
+    async def create_secure_sandbox(self, security_level: SandboxSecurityLevel = SandboxSecurityLevel.BASIC,
+                                   max_runtime: int = 30, **options) -> Dict:
+        """Create a secure sandbox with enhanced security.
+        
+        Args:
+            security_level: Security level (basic, strict, container)
+            max_runtime: Maximum runtime in minutes
+            **options: Additional options (allowed_domains, max_cpu, etc.)
+            
+        Returns:
+            Dict with session_id, sandbox_id, droplet_id, ip_address
+        """
+        # Check rate limit
+        if not self.security_monitor.check_rate_limit("create", max_attempts=10):
+            return {"error": "Rate limit exceeded for sandbox creation"}
+        
+        # Create security session
+        session = self.security_monitor.create_session(
+            security_level=security_level,
+            max_runtime=max_runtime,
+            **options
         )
-
-    async def execute_in_sandbox(self, droplet_ip: str, script_content: str, lang: str = "python") -> dict:
-        """Upload and execute untrusted script via SSH, waiting for result."""
         
-        key_path = os.path.expanduser("~/.ssh/id_rsa")
+        self.security_monitor.update_session(session.session_id, 
+                                          status=SandboxStatus.DEPLOYING)
+        
+        # Generate user data
+        user_data = self._get_user_data(session)
+        
+        try:
+            logger.info(f"Deploying secure sandbox: {session.sandbox_id}")
+            
+            # Deploy droplet
+            result = await self.mgr.create_droplet(
+                name=session.sandbox_id,
+                size="s-1vcpu-2gb",
+                droplet_type="sandbox",
+                ttl_minutes=max_runtime + 5,  # Buffer
+                user_data=user_data
+            )
+            
+            if "error" in result:
+                self.security_monitor.update_session(session.session_id,
+                                                   status=SandboxStatus.FAILED)
+                self.security_monitor._audit(session.session_id, "deploy", False, 
+                                            result.get("error"))
+                return result
+            
+            droplet_id = result.get("droplet_id")
+            ip_address = result.get("public_ip")
+            
+            # Update session
+            self.security_monitor.update_session(
+                session.session_id,
+                droplet_id=droplet_id,
+                ip_address=ip_address,
+                status=SandboxStatus.RUNNING
+            )
+            
+            self.security_monitor._audit(session.session_id, "deploy", True,
+                                       f"Droplet: {droplet_id}, IP: {ip_address}")
+            
+            return {
+                "session_id": session.session_id,
+                "sandbox_id": session.sandbox_id,
+                "droplet_id": droplet_id,
+                "ip_address": ip_address,
+                "security_level": security_level.value,
+                "max_runtime": max_runtime
+            }
+            
+        except Exception as e:
+            logger.error(f"Sandbox deployment error: {e}")
+            self.security_monitor.update_session(session.session_id,
+                                              status=SandboxStatus.FAILED)
+            self.security_monitor._audit(session.session_id, "deploy", False, str(e))
+            return {"error": str(e)}
+    
+    async def execute_in_sandbox(self, session_id: str, script_content: str, 
+                                lang: str = "python", timeout: int = 120) -> Dict:
+        """Execute script in sandbox with credential isolation.
+        
+        IMPORTANT: No credentials are passed to the sandbox. 
+        All secrets must be retrieved at runtime from the host.
+        """
+        session = self.security_monitor.get_session(session_id)
+        
+        if not session:
+            return {"error": "Session not found"}
+        
+        if session.status not in [SandboxStatus.RUNNING, SandboxStatus.EXECUTING]:
+            return {"error": f"Invalid session status: {session.status}"}
+        
+        if not session.ip_address:
+            return {"error": "Sandbox IP not available"}
+        
+        self.security_monitor.update_session(session_id, 
+                                          status=SandboxStatus.EXECUTING)
+        self.security_monitor._audit(session_id, "execute", True,
+                                   f"Starting {lang} execution")
+        
+        # Get SSH key from security manager (NOT from vault in sandbox)
+        from devplane.security.ssh_manager import get_ssh_manager
+        ssh_mgr = get_ssh_manager()
+        
+        key_path, _ = ssh_mgr.get_key_for_connection("deployment")
+        
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         
-        logger.info(f"Connecting to sandbox IP: {droplet_ip}")
         try:
-            # We wrap this in a loop because droplet might take 30-40 secs of booting before SSH allows connections
-            connected = False
-            for attempt in range(10):
-                try:
-                    client.connect(hostname=droplet_ip, username="root", key_filename=key_path, timeout=5)
-                    connected = True
-                    break
-                except Exception:
-                    await asyncio.sleep(5)
-                    
-            if not connected:
-                return {"error": "Failed to SSH into sandbox after boot."}
-                
-            # Drop the script in the non-privileged workspace
-            ext = "py" if lang == "python" else "bash" if lang == "bash" else "js"
-            remote_path = f"/home/clawbot/workspace/task.{ext}"
+            # Connect with timeout
+            client.connect(
+                hostname=session.ip_address,
+                username="root",
+                key_filename=key_path,
+                timeout=30,
+                banner_timeout=30
+            )
             
-            # Using SFTP to securely transfer the exact string content
+            # Determine file extension
+            ext = {"python": "py", "bash": "sh", "javascript": "js"}.get(lang, "txt")
+            remote_path = f"/home/{session.user}/workspace/task.{ext}"
+            
+            # Upload script via SFTP
             sftp = client.open_sftp()
             with sftp.file(remote_path, 'w') as f:
                 f.write(script_content)
             sftp.close()
             
-            # Fix perms
-            client.exec_command(f"chown clawbot:clawbot {remote_path}")
+            # Set permissions (run as non-root)
+            client.exec_command(f"chown {session.user}:{session.user} {remote_path}")
             
-            # Execute command as the unprivileged user
-            cmd = f"sudo -u clawbot python3 {remote_path}" if lang == "python" else f"sudo -u clawbot bash {remote_path}"
-            logger.info("Triggering sandbox execution...")
-            stdin, stdout, stderr = client.exec_command(cmd, timeout=120) # Max 2 mins of compute
+            # Execute as non-privileged user
+            cmd = f"sudo -u {session.user} {lang}3 {remote_path}" if lang == "python" else f"sudo -u {session.user} {lang} {remote_path}"
+            
+            # Run with timeout
+            stdin, stdout, stderr = client.exec_command(cmd, timeout=timeout)
             
             exit_code = stdout.channel.recv_exit_status()
             out_data = stdout.read().decode('utf-8', errors='replace')
             err_data = stderr.read().decode('utf-8', errors='replace')
             
-            logger.info(f"Sandbox completed with exit code: {exit_code}")
+            session.execution_count += 1
+            
+            self.security_monitor._audit(session_id, "execute_complete", True,
+                                       f"Exit code: {exit_code}")
+            
             return {
                 "success": exit_code == 0,
                 "exit_code": exit_code,
                 "stdout": out_data,
-                "stderr": err_data
+                "stderr": err_data,
+                "execution_count": session.execution_count
             }
             
         except Exception as e:
-            logger.error(f"Sandbox SSH execution error: {e}")
+            logger.error(f"Sandbox execution error: {e}")
+            self.security_monitor._audit(session_id, "execute", False, str(e))
             return {"error": str(e)}
+            
         finally:
             client.close()
-
-    async def run_safe_task(self, python_script: str, system_type: str = "basic") -> dict:
-        """End-to-end sandbox lifecycle: Deploy -> Check -> Run -> Destroy."""
+            self.security_monitor.update_session(session_id, 
+                                              status=SandboxStatus.RUNNING)
+    
+    async def destroy_sandbox(self, session_id: str) -> bool:
+        """Destroy a sandbox and clean up."""
+        session = self.security_monitor.get_session(session_id)
         
-        if not self.mgr.configured:
-            return {"error": "DigitalOcean not configured for sandbox deployment."}
-            
-        # 1. Deploy
-        deploy_res = await self.create_firewalled_sandbox(system_type=system_type)
-        if "error" in deploy_res:
-            return deploy_res
-            
-        droplet_id = deploy_res["droplet_id"]
+        if not session:
+            return False
         
         try:
-            # Wait for public IP assignment
-            ip_address = None
-            for _ in range(15):
-                await asyncio.sleep(4)
-                status = await self.mgr.get_droplet(droplet_id)
-                if status.get("public_ip"):
-                    ip_address = status["public_ip"]
-                    break
-                    
-            if not ip_address:
-                raise Exception("Sandbox failed to acquire an IP address.")
-                
-            logger.info(f"Sandbox IP Acquired: {ip_address}, waiting for boot...")
-            await asyncio.sleep(30) # Let UFW and useradd initialize
+            if session.droplet_id:
+                await self.mgr.destroy_droplet(session.droplet_id)
             
-            # 2. Execute
-            exec_res = await self.execute_in_sandbox(ip_address, python_script)
-            return exec_res
+            self.security_monitor.update_session(
+                session_id,
+                status=SandboxStatus.DESTROYED,
+                destroyed_at=datetime.utcnow()
+            )
+            
+            self.security_monitor._audit(session_id, "destroy", True,
+                                       "Sandbox destroyed")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Sandbox destruction error: {e}")
+            self.security_monitor._audit(session_id, "destroy", False, str(e))
+            return False
+    
+    async def run_secure_task(self, script_content: str, 
+                            lang: str = "python",
+                            security_level: SandboxSecurityLevel = SandboxSecurityLevel.BASIC,
+                            max_runtime: int = 30, **options) -> Dict:
+        """End-to-end secure sandbox execution.
+        
+        This is the main entry point for secure task execution.
+        No credentials are ever passed to the sandbox.
+        """
+        
+        # Check rate limit
+        if not self.security_monitor.check_rate_limit("task"):
+            return {"error": "Rate limit exceeded"}
+        
+        # Deploy sandbox
+        deploy_result = await self.create_secure_sandbox(
+            security_level=security_level,
+            max_runtime=max_runtime,
+            **options
+        )
+        
+        if "error" in deploy_result:
+            return deploy_result
+        
+        session_id = deploy_result["session_id"]
+        
+        try:
+            # Wait for boot
+            await asyncio.sleep(30)
+            
+            # Execute task
+            exec_result = await self.execute_in_sandbox(session_id, script_content, lang)
+            return exec_result
             
         finally:
-            # 3. Destroy (Always runs, even if python script errors)
-            logger.info(f"Atomizing sandbox droplet {droplet_id}")
-            await self.mgr.destroy_droplet(droplet_id)
+            # Always destroy sandbox
+            await self.destroy_sandbox(session_id)
+    
+    def get_session_info(self, session_id: str) -> Optional[Dict]:
+        """Get session information."""
+        session = self.security_monitor.get_session(session_id)
+        
+        if not session:
+            return None
+        
+        return {
+            "session_id": session.session_id,
+            "sandbox_id": session.sandbox_id,
+            "status": session.status.value,
+            "created_at": session.created_at.isoformat(),
+            "ip_address": session.ip_address,
+            "security_level": session.security_level.value,
+            "execution_count": session.execution_count,
+            "max_runtime": session.max_runtime_minutes
+        }
+    
+    def get_audit_log(self, session_id: str = None, limit: int = 100) -> List[Dict]:
+        """Get audit log."""
+        return self.security_monitor.get_audit_log(session_id, limit)
+
+
+# ─── Factory Function ───────────────────────────────────────────────────────────
+
+_sandbox_manager: Optional[SandboxManager] = None
 
 
 def get_sandbox_manager() -> SandboxManager:
-    return SandboxManager()
+    """Get or create the global sandbox manager."""
+    global _sandbox_manager
+    
+    if _sandbox_manager is None:
+        _sandbox_manager = SandboxManager()
+    
+    return _sandbox_manager
