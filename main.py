@@ -8,6 +8,7 @@ import asyncio
 import importlib.util
 import os
 import secrets
+import stat
 import time
 import logging
 from contextlib import asynccontextmanager
@@ -27,6 +28,13 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger("devplane")
+
+def secure_env_file(path: str) -> None:
+    """Set file permissions to owner read/write only (0o600)."""
+    try:
+        os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+    except OSError as e:
+        logger.warning(f"Could not set secure permissions on {path}: {e}")
 
 START_TIME = time.time()
 
@@ -130,6 +138,7 @@ if not SECRET_KEY:
         if not os.path.exists(env_file):
             open(env_file, "a").close()
         set_key(env_file, "SECRET_KEY", SECRET_KEY)
+        secure_env_file(env_file)
         os.environ["SECRET_KEY"] = SECRET_KEY
     except Exception as e:
         logger.error(f"Failed to save SECRET_KEY to .env: {e}")
@@ -642,6 +651,7 @@ async def save_setup(request: Request, data: SetupData):
     env_file = ".env"
     if not os.path.exists(env_file):
         open(env_file, "a").close()
+        secure_env_file(env_file)
 
     for key, value in data.model_dump().items():
         if value:
@@ -652,6 +662,7 @@ async def save_setup(request: Request, data: SetupData):
             # We still write to .env for legacy compatibility, but in a real production
             # system we would only load from Vault on startup
             set_key(env_file, key, value)
+    secure_env_file(env_file)
 
     # Also update providers in DB
     from devplane.providers import get_provider_by_name, update_provider
@@ -777,11 +788,13 @@ async def lockhost_save(request: Request, config: dict):
         # Ensure file exists
         if not os.path.exists(env_file):
             open(env_file, "a").close()
+            secure_env_file(env_file)
         
         # Apply updates
         for env_key_name, api_key in env_updates:
             set_key(env_file, env_key_name, api_key)
             os.environ[env_key_name] = api_key
+        secure_env_file(env_file)
 
     # Reload all keys into environment for LiteLLM
     await load_all_keys_to_env()
@@ -868,6 +881,7 @@ async def deploy_configuration(request: Request, data: DeployData):
     # Ensure .env exists
     if not os.path.exists(env_file):
         open(env_file, "a").close()
+        secure_env_file(env_file)
     
     # Store each non‑empty secret in vault and environment
     for key, value in data.model_dump().items():
@@ -875,6 +889,7 @@ async def deploy_configuration(request: Request, data: DeployData):
             await vault.store_secret(key, value, ttl_minutes=0)
             os.environ[key] = value
             set_key(env_file, key, value)
+    secure_env_file(env_file)
     
     # Update providers in DB
     key_map = {
@@ -956,6 +971,7 @@ async def update_secret(request: Request, payload: dict):
     if not os.path.exists(env_file):
         open(env_file, "a").close()
     set_key(env_file, key, value)
+    secure_env_file(env_file)
     
     logger.info(f"Secret '{key}' updated.")
     return {"status": "success", "key": key}

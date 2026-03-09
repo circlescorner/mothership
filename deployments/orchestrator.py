@@ -78,18 +78,24 @@ async def run_ssh_command(
     command: str,
     ssh_key_path: Optional[str] = None,
     user: str = "root",
-    timeout: int = 10
+    timeout: int = 10,
+    strict_host_key_checking: Optional[bool] = None
 ) -> str:
     """
     Run a remote SSH command with timeout protection.
     Uses the exact flags mandated by AGENTS.md.
     """
+    # Determine strict host key checking setting
+    if strict_host_key_checking is None:
+        env_value = os.environ.get("SSH_STRICT_HOST_KEY_CHECKING", "no").lower()
+        strict_host_key_checking = env_value in ("yes", "true", "1")
+    
     ssh_cmd = [
         "ssh",
         "-o", "ConnectTimeout=" + str(timeout),
         "-o", "ServerAliveInterval=5",
         "-o", "ServerAliveCountMax=3",
-        "-o", "StrictHostKeyChecking=no",
+        "-o", f"StrictHostKeyChecking={'yes' if strict_host_key_checking else 'no'}",
     ]
     if ssh_key_path:
         ssh_cmd.extend(["-i", ssh_key_path])
@@ -157,9 +163,10 @@ def validate_environment(env: str) -> List[str]:
 # ============================================================================
 
 class DeploymentOrchestrator:
-    def __init__(self, env: str, dry_run: bool = False):
+    def __init__(self, env: str, dry_run: bool = False, strict_host_key_checking: bool = False):
         self.env = env
         self.dry_run = dry_run
+        self.strict_host_key_checking = strict_host_key_checking
         self.settings = get_settings()
         self.state_file = Path(f"deployments/state-{env}.json")
         self.state = self._load_state()
@@ -309,7 +316,7 @@ class DeploymentOrchestrator:
         if Path(setup_script).exists():
             with open(setup_script, "r") as f:
                 script_content = f.read()
-            await run_ssh_command(ip, script_content)
+            await run_ssh_command(ip, script_content, strict_host_key_checking=self.strict_host_key_checking)
         
         logger.info("Remote deployment completed.")
     
@@ -369,6 +376,11 @@ async def main():
         help="Preview changes without executing",
     )
     parser.add_argument(
+        "--strict-host-key",
+        action="store_true",
+        help="Enable strict SSH host key checking (default: no)",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="Enable debug logging",
@@ -389,9 +401,9 @@ async def main():
     if missing:
         logger.error(f"Missing required environment variables: {', '.join(missing)}")
         sys.exit(1)
-    
     # Create orchestrator
-    orchestrator = DeploymentOrchestrator(env=args.env, dry_run=args.dry_run)
+    orchestrator = DeploymentOrchestrator(env=args.env, dry_run=args.dry_run, strict_host_key_checking=args.strict_host_key)
+    
     
     # Execute phases
     phases = []
