@@ -17,6 +17,10 @@ ENV/
 # System
 .DS_Store
 
+# Logs
+logs/
+*.log
+
 # Database
 *.db
 devplane.db

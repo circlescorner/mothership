@@ -1,7 +1,7 @@
 """Cloudflare DNS & Tunnel Manager — automated domain management for DevPlane.
 
 Supports both Cloudflare API Token (preferred) and Global API Key authentication
-to manage DNS records and tunnels for the glondor.xyz domain.
+to manage DNS records and tunnels for the configured domain.
 Auto-exposes new droplets and Kasm workspaces.
 """
 
@@ -15,7 +15,7 @@ logger = logging.getLogger("devplane.infra.cloudflare")
 
 
 class CloudflareManager:
-    """Manages Cloudflare DNS records and tunnels for glondor.xyz."""
+    """Manages Cloudflare DNS records and tunnels."""
 
     def __init__(self):
         # Support both API Token (preferred) and Global API Key (legacy)
@@ -241,7 +241,7 @@ class CloudflareManager:
         """One-call to create/update a DNS record pointing a subdomain to an IP.
 
         Example: auto_expose("164.92.100.50", "ws-abc123")
-        → Creates ws-abc123.glondor.xyz → 164.92.100.50
+        → Creates ws-abc123.<domain> → 164.92.100.50
         """
         if not self.configured:
             return {"error": "Cloudflare not configured"}

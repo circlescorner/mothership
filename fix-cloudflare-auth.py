@@ -32,7 +32,7 @@ except ImportError:
 # ===============================================================================
 
 ENV_FILE = Path(".env")
-DOMAIN = "glondor.xyz"
+DOMAIN = os.environ.get("CLOUDFLARE_DOMAIN", "glondor.xyz")
 
 REQUIRED_PERMISSIONS = {
     "zone": [
@@ -474,7 +474,7 @@ def print_token_creation_instructions():
     print_bold("Click: 'Create Token' -> 'Get started' (Custom token)")
     print()
     
-    print(f"{Colors.BOLD}Token Name:{Colors.END} DevPlane - glondor.xyz Management")
+    print(f"{Colors.BOLD}Token Name:{Colors.END} DevPlane Management")
     print()
     
     print(f"{Colors.BOLD}Configure these EXACT permissions:{Colors.END}\n")

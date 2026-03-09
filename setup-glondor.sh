@@ -1,12 +1,12 @@
 #!/bin/bash
 # ═══════════════════════════════════════════════════════════════════════════════
-# Cloudflare Setup Script for glondor.xyz
+# Cloudflare Setup Script
 # Run this after DNS is pointed to your server
 # ═══════════════════════════════════════════════════════════════════════════════
 
 set -e
 
-DOMAIN="glondor.xyz"
+DOMAIN="${DEPLOYMENT_DOMAIN:-glondor.xyz}"
 
 echo "☁️  Cloudflare Setup for $DOMAIN"
 echo "================================"

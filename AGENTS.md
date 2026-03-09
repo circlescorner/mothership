@@ -49,13 +49,23 @@ Infrastructure state is tracked in JSON files (do not edit manually):
 - `devplane-droplet.json` - Control plane configuration
 - `gate-firewall.json` - Firewall rule definitions
 
-### Script Execution Order
-1. `scripts/deploy-infrastructure.py --discover` - Verify resources
-2. `scripts/deploy-infrastructure.py --dry-run` - Preview changes
-3. `scripts/deploy-infrastructure.py --deploy` - Create infrastructure
-4. `scripts/setup-gate-droplet.sh` - Run ON the gate droplet via SSH
-5. `scripts/setup-devplane-control.sh` - Run ON the control droplet via SSH
-6. `scripts/configure-cloudflare.py` - Configure DNS/SSL
+### Script Execution Order (New Deployment Pipeline)
+
+The new deployment pipeline uses `deployments/orchestrator.py`:
+
+1. `python deployments/orchestrator.py --env production --phase discover --dry-run` - Verify resources
+2. `python deployments/orchestrator.py --env production --phase provision` - Create infrastructure
+3. `python deployments/orchestrator.py --env production --phase configure` - Generate configuration
+4. `python deployments/orchestrator.py --env production --phase deploy` - Deploy application
+5. `python deployments/orchestrator.py --env production --phase verify` - Health checks
+
+### Legacy Scripts (Deprecated)
+
+Old scripts have been moved to `deployments/legacy/`:
+- `deployments/legacy/deploy.py`
+- `deployments/legacy/provision-and-deploy.py`
+- `deployments/legacy/deploy-glondor.sh`
+- `deployments/legacy/deploy-glondor-prod.sh`
 
 ## OpenSpec Workflow
 

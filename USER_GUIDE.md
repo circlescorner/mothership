@@ -72,10 +72,116 @@ When running highly autonomous, full-access LLM tools (like `Clawbot`), security
 
 All settings, API keys, and model roles are securely managed without needing to SSH into servers.
 
-1.  **The Lockhost Wizard:** Navigate to `https://cp.yourdomain.com/lockhost` to configure API keys (OpenRouter, DeepSeek, etc.) and assign 5-way model fallbacks for roles (Architect, Worker, Fast).
-2.  **Domain & Cloudflare:** DevPlane natively interacts with the Cloudflare API to dynamically create DNS records and manage tunnels for new workspaces.
+### Configuration Management System
+
+DevPlane uses a **Pydantic Settings**-based configuration system (`devplane/core/config.py`) that loads configuration from multiple sources (in order of priority):
+
+1.  **Environment Variables** (highest priority)
+2.  **Environment-specific YAML files** (`config/environments/{dev,staging,production}.yaml`)
+3.  **Default values** defined in Pydantic models
+
+#### Environment Configuration Files
+
+Configuration files are located in `config/environments/`:
+
+*   `dev.yaml` - Development environment defaults
+*   `staging.yaml` - Staging environment defaults
+*   `production.yaml` - Production environment defaults
+
+Example `config/environments/production.yaml`:
+```yaml
+ENV: production
+DEPLOYMENT_DOMAIN: yourdomain.com
+DEPLOYMENT_MODE: remote
+CLOUDFLARE_API_TOKEN: ""
+DIGITALOCEAN_TOKEN: ""
+```
+
+#### Key Configuration Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `ENV` | Runtime environment | `development`, `staging`, `production` |
+| `DEPLOYMENT_DOMAIN` | Primary domain for deployment | `yourdomain.com` |
+| `DEPLOYMENT_MODE` | Deployment mode | `local`, `remote`, `docker` |
+| `SECRET_KEY` | Secret key for session signing | (auto-generated if not set) |
+| `DATABASE_URL` | Database connection URL | `sqlite+aiosqlite:///./devplane.db` |
+
+All sensitive values are stored as `SecretStr` and are never printed in logs.
+
+### Setting Up Your Environment
+
+1.  **Copy the example environment file:**
+    ```bash
+    cp .env.example .env
+    ```
+
+2.  **Edit `.env` with your API keys and settings:**
+    ```env
+    ENV=production
+    DEPLOYMENT_DOMAIN=yourdomain.com
+    SECRET_KEY=$(openssl rand -hex 32)
+    
+    # AI Providers (configure at least 2-3)
+    DEEPSEEK_API_KEY=sk-...
+    GROQ_API_KEY=gsk_...
+    GEMINI_API_KEY=...
+    OPENROUTER_API_KEY=sk-or-v1-...
+    
+    # Infrastructure
+    DIGITALOCEAN_TOKEN=dop_v1_...
+    CLOUDFLARE_API_TOKEN=...
+    CLOUDFLARE_ACCOUNT_ID=...
+    CLOUDFLARE_ZONE_ID=...
+    ```
+
+3.  **The Lockhost Wizard:** Navigate to `https://cp.yourdomain.com/lockhost` to configure API keys and assign 5-way model fallbacks for roles (Architect, Worker, Fast).
+
+4.  **Domain & Cloudflare:** DevPlane natively interacts with the Cloudflare API to dynamically create DNS records and manage tunnels for new workspaces.
 
 To ensure your system remains up to industry best practices, we implement FastAPI Security Middleware, strict CORS policies tied only to your domain, and Cloudflare Access (Zero Trust) requiring email/MFA authentication before even reaching the DevPlane web server.
+
+---
+
+## 🚀 Deployment Pipeline
+
+DevPlane uses a unified deployment orchestrator (`deployments/orchestrator.py`) that replaces the legacy deployment scripts.
+
+### Phase-Based Deployment
+
+The orchestrator supports phase-based execution with dry-run capability:
+
+```bash
+# Discover existing resources (dry-run friendly)
+python deployments/orchestrator.py --env production --phase discover --dry-run
+
+# Provision infrastructure
+python deployments/orchestrator.py --env staging --phase provision
+
+# Deploy application
+python deployments/orchestrator.py --env production --phase deploy
+
+# Run full pipeline
+python deployments/orchestrator.py --env production --phase all
+```
+
+### Deployment Phases
+
+1.  **discover** - Check existing resources (Cloudflare tunnels, DNS records, droplets)
+2.  **provision** - Create missing infrastructure (droplets, tunnels, DNS records)
+3.  **configure** - Generate environment-specific configuration files
+4.  **deploy** - Deploy application (local Docker Compose or remote droplet)
+5.  **verify** - Health checks and smoke tests
+6.  **rollback** - Rollback to previous deployment snapshot
+
+### Legacy Scripts
+
+Old deployment scripts have been moved to `deployments/legacy/` for reference:
+*   `deployments/legacy/deploy.py`
+*   `deployments/legacy/provision-and-deploy.py`
+*   `deployments/legacy/deploy-glondor.sh`
+
+See [`deployments/DEPLOYMENT_GUIDE.md`](deployments/DEPLOYMENT_GUIDE.md) for detailed deployment instructions.
 
 ---
 
@@ -168,5 +274,7 @@ The **Kiloclaw System** is a specialized configuration for the sandbox that enab
 - **Chain Engine**: See `devplane/chain/engine.py` for chain execution logic.
 - **Memory & Caching**: See `devplane/memory/store.py` for persistent memory schemas.
 - **Security**: See `devplane/security/` for secrets management and encryption.
+- **Configuration**: See `devplane/core/config.py` for Pydantic settings configuration.
+- **Deployment**: See `deployments/DEPLOYMENT_GUIDE.md` for detailed deployment instructions.
 
-For more information, refer to `DEPLOYMENT.md` and the project README.
+For more information, refer to [`DEPLOYMENT.md`](DEPLOYMENT.md), [`README.md`](README.md), and the project documentation.

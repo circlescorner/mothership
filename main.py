@@ -416,20 +416,6 @@ REGISTER_PAGE = """<!DOCTYPE html>
 </body>
 </html>"""
 
-def require_auth(request: Request):
-    """Dependency to require authentication."""
-    from devplane.auth import get_current_user
-    import asyncio
-    try:
-        # Run sync check for session
-        session_id = request.cookies.get("devplane_session")
-        if not session_id:
-            return False
-        from devplane.auth import get_session
-        session = asyncio.get_event_loop().run_until_complete(get_session(session_id))
-        return session is not None
-    except:
-        return False
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page():

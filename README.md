@@ -47,46 +47,131 @@ Mothership Optimized is a production-ready control plane for AI agent chains wit
    - Deployment wizard for infrastructure provisioning
    - Secrets management for secure credential storage
 
-## Current Configuration
+## Project Structure
 
-### Free AI Providers
-- **DeepSeek** - Free tier with 128K context
-- **Gemini** - Free tier (limited availability)
-- **Groq** - Free tier with Llama 3.3 70B
-- **OpenRouter** - Paid but with free credits
+```
+mothership_optimized/
+├── config/                      # Environment-specific configurations
+│   └── environments/
+│       ├── dev.yaml            # Development configuration
+│       ├── staging.yaml        # Staging configuration
+│       └── production.yaml     # Production configuration
+├── deployments/                 # Deployment pipeline
+│   ├── orchestrator.py         # Unified deployment orchestrator
+│   ├── DEPLOYMENT_GUIDE.md     # Detailed deployment guide
+│   ├── legacy/                 # Deprecated scripts (for reference)
+│   ├── scripts/                # Reusable deployment scripts
+│   ├── docker/                 # Docker-related files
+│   └── terraform/              # Infrastructure-as-code (optional)
+├── devplane/                    # Core application code
+│   ├── core/
+│   │   └── config.py           # Pydantic settings configuration
+│   ├── api/                    # FastAPI endpoints
+│   ├── chain/                  # Chain execution engine
+│   ├── infra/                  # Infrastructure management
+│   ├── memory/                 # Vector memory store
+│   ├── orchestration/          # Workflow orchestration
+│   ├── secrets/                # Secret management (Vault)
+│   ├── security/               # Security utilities
+│   └── slack/                  # Slack bot integration
+├── tests/                       # Test suite
+├── static/                      # Web dashboard assets
+├── docs/                        # Additional documentation
+├── .env.example                 # Environment variable template
+└── requirements.txt            # Python dependencies
+```
 
-### Infrastructure
-- **Control Plane**: Fly.io (scale-to-zero, free tier) deployed at `mothership-optimized.fly.dev`
-- **Compute**: DigitalOcean droplets (2 active instances: worker + workspace) - previous droplets destroyed
-- **DNS**: Cloudflare (configured but requires valid API key)
-- **Database**: SQLite with Qdrant for vector storage
+## Configuration Management
 
-### Budget Settings
-- Total monthly budget: $5.00
-- Provider-level monthly budgets configured
-- Real-time spending tracking via credits system
+DevPlane uses a **Pydantic Settings**-based configuration system that loads from:
 
-## Deployment Status
+1. **Environment Variables** (highest priority)
+2. **Environment-specific YAML files** (`config/environments/`)
+3. **Default values** in Pydantic models
 
-✅ **Control Plane**: Deployed to Fly.io at `mothership-optimized.fly.dev`  
-✅ **Database**: SQLite + Qdrant running locally (can be migrated to cloud)  
-✅ **Infrastructure**: DigitalOcean integration active (2 droplets running: worker + workspace, previous droplets destroyed)  
-✅ **AI Providers**: DeepSeek, OpenRouter configured and tested  
-✅ **Budget Enforcement**: Credits system tracking all spending  
-✅ **Memory System**: Qdrant connected and operational  
+### Quick Configuration
 
-## Usage
-
-### Starting the System
 ```bash
-# Install dependencies
+# 1. Copy the example environment file
+cp .env.example .env
+
+# 2. Edit .env with your settings
+nano .env
+```
+
+### Required Environment Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `ENV` | Runtime environment | `development`, `staging`, `production` |
+| `DEPLOYMENT_DOMAIN` | Primary domain | `yourdomain.com` |
+| `SECRET_KEY` | Session signing key | (auto-generated) |
+| `DATABASE_URL` | Database connection | `sqlite+aiosqlite:///./devplane.db` |
+
+### AI Provider API Keys (configure at least 2-3)
+
+| Variable | Provider | Get Key At |
+|----------|----------|------------|
+| `DEEPSEEK_API_KEY` | DeepSeek | https://platform.deepseek.com |
+| `GROQ_API_KEY` | Groq | https://console.groq.com |
+| `GEMINI_API_KEY` | Gemini | https://aistudio.google.com |
+| `OPENROUTER_API_KEY` | OpenRouter | https://openrouter.ai |
+
+### Infrastructure Configuration
+
+| Variable | Description |
+|----------|-------------|
+| `DIGITALOCEAN_TOKEN` | DigitalOcean API token |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API token (recommended) |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID |
+| `CLOUDFLARE_ZONE_ID` | Cloudflare zone ID |
+
+## Quick Start
+
+### Local Development
+
+```bash
+# 1. Clone and setup
+git clone <repo-url>
+cd mothership_optimized
 pip install -r requirements.txt
 
-# Start the server
+# 2. Configure environment
+cp .env.example .env
+# Edit .env with your API keys
+
+# 3. Run the server
 python -m uvicorn main:app --port 8000 --reload
 ```
 
-### API Endpoints
+### Using the Deployment Orchestrator
+
+```bash
+# Discover existing resources (dry-run)
+python deployments/orchestrator.py --env production --phase discover --dry-run
+
+# Deploy to staging
+python deployments/orchestrator.py --env staging --phase deploy
+
+# Run full pipeline for production
+python deployments/orchestrator.py --env production --phase all
+```
+
+### Docker Deployment
+
+```bash
+# Build and run with Docker Compose
+docker-compose up -d
+
+# With Cloudflare Tunnel (secure public access)
+docker-compose --profile tunnel up -d
+
+# With Monitoring (Prometheus + Grafana)
+docker-compose --profile monitoring up -d
+```
+
+## API Endpoints
+
 - `GET /` - Dashboard interface
 - `POST /api/chains/run` - Execute AI chain
 - `GET /api/infra/status` - Infrastructure status
@@ -103,6 +188,7 @@ python -m uvicorn main:app --port 8000 --reload
 - `POST /api/secrets` - Update a secret
 
 ### Running a Chain
+
 ```bash
 curl -X POST -H "Content-Type: application/json" \
   -d '{"prompt":"Say hello", "project_id":0, "mode":"tournament"}' \
@@ -126,13 +212,14 @@ Based on initial testing:
 - **Most Cost-Effective**: GPT-4o ($0.0001875 per call)
 - **Highest Quality**: Claude 3.5 Sonnet (0.7 quality score)
 
-## Next Steps
+## Documentation
 
-1. **Domain Configuration**: Fix Cloudflare API authentication for DNS automation
-2. **Free Tier Optimization**: Increase usage of DeepSeek for cost-free operations
-3. **Monitoring**: Add Prometheus metrics and alerting
-4. **High Availability**: Migrate database to cloud SQLite/PostgreSQL
-5. **Security**: Implement API key rotation and audit logging
+- **[USER_GUIDE.md](USER_GUIDE.md)** - Complete user guide for DevPlane
+- **[DEPLOYMENT.md](DEPLOYMENT.md)** - Deployment instructions
+- **[deployments/DEPLOYMENT_GUIDE.md](deployments/DEPLOYMENT_GUIDE.md)** - New deployment pipeline guide
+- **[GLONDOR-SETUP.md](GLONDOR-SETUP.md)** - Server setup guide
+- **[AGENTS.md](AGENTS.md)** - Development patterns and safety guidelines
+- **[CHANGELOG.md](CHANGELOG.md)** - Project changelog
 
 ## Cost Breakdown
 
@@ -145,10 +232,34 @@ Based on initial testing:
 
 *Note: The $5 budget applies only to new AI API spending, not existing infrastructure.*
 
+## Security
+
+- **Cloudflare Tunnel** for secure access without opening ports
+- **Rate limiting** configured in `devplane/security.py`
+- **Strong secrets** (generate with `openssl rand -hex 32`)
+- **Regular backups** of `devplane.db`
+- **Audit logging** via `/api/health/detailed`
+
+## Testing
+
+```bash
+# Run all tests
+pytest
+
+# Run specific test file
+pytest tests/test_config_endpoints.py
+
+# Run with coverage
+pytest --cov=devplane
+```
+
 ## License
 
 Proprietary - Internal use only
 
 ## Support
 
-For issues or questions, contact the development team via Slack integration.
+For issues or questions:
+1. Check the documentation in `docs/`
+2. Review logs: `docker-compose logs -f devplane`
+3. Contact the development team via Slack integration

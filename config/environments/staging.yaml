@@ -1,0 +1,71 @@
+# DevPlane Staging Configuration
+# This file contains environment-specific configuration for staging.
+# Values here can be overridden by environment variables.
+
+# Environment
+ENV: staging
+DEPLOYMENT_DOMAIN: staging.yourdomain.com
+DEPLOYMENT_MODE: remote
+
+# Server
+HOST: 0.0.0.0
+PORT: 8000
+CORS_ORIGINS: "https://staging.yourdomain.com,http://localhost:3000"
+
+# Database
+DATABASE_URL: sqlite+aiosqlite:///./devplane.db
+DEVPLANE_DB_PATH: ./devplane.db
+
+# Security (generate your own secrets)
+SECRET_KEY: ""  # will be auto-generated if empty
+JWT_SECRET: ""
+VAULT_MASTER_KEY: ""
+
+# Cloudflare (required for staging)
+CLOUDFLARE_API_KEY: ""
+CLOUDFLARE_API_TOKEN: ""
+CLOUDFLARE_EMAIL: ""
+CLOUDFLARE_ACCOUNT_ID: ""
+CLOUDFLARE_ZONE_ID: ""
+CLOUDFLARE_DOMAIN: staging.yourdomain.com
+TUNNEL_TOKEN: ""
+TUNNEL_NAME: devplane-staging-tunnel
+
+# DigitalOcean (optional)
+DIGITALOCEAN_TOKEN: ""
+DIGITALOCEAN_REGION: nyc1
+DROPLET_NAME: devplane-staging
+DROPLET_IMAGE: ubuntu-22-04-x64
+DROPLET_REGION: nyc1
+DEPLOY_DIR: /opt/devplane
+
+# AI Providers (add your own keys)
+OPENROUTER_API_KEY: ""
+DEEPSEEK_API_KEY: ""
+GROQ_API_KEY: ""
+GEMINI_API_KEY: ""
+TOGETHERAI_API_KEY: ""
+CEREBRAS_API_KEY: ""
+FIREWORKS_AI_API_KEY: ""
+OPENAI_API_KEY: ""
+
+# Slack
+SLACK_BOT_TOKEN: ""
+SLACK_APP_TOKEN: ""
+
+# Vector Database
+QDRANT_URL: http://localhost:6333
+QDRANT_KEY: ""
+
+# SSO (optional)
+SSO_PROVIDER: google
+SSO_GOOGLE_CLIENT_ID: ""
+SSO_GOOGLE_CLIENT_SECRET: ""
+SSO_REDIRECT_URI: ""
+
+# Timeouts & Safety
+SSH_CONNECT_TIMEOUT: 10
+SSH_SERVER_ALIVE_INTERVAL: 5
+SSH_SERVER_ALIVE_COUNT_MAX: 3
+SUBPROCESS_TIMEOUT: 30
+APT_TIMEOUT: 300

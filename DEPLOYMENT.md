@@ -2,7 +2,13 @@
 
 Complete deployment instructions for DevPlane in various environments.
 
-## Quick Start
+> **Note:** This guide has been updated to reflect the new deployment pipeline. For the legacy deployment documentation, see `deployments/legacy/` directory. For detailed information about the new orchestrator, see [`deployments/DEPLOYMENT_GUIDE.md`](deployments/DEPLOYMENT_GUIDE.md).
+
+---
+
+## Quick Start (New Deployment Pipeline)
+
+The new deployment pipeline uses `deployments/orchestrator.py` with environment-specific configuration.
 
 ### Local Development
 
@@ -20,20 +26,115 @@ cp .env.example .env
 python -m uvicorn main:app --reload --port 8000
 ```
 
+### Using the Deployment Orchestrator
+
+```bash
+# Discover existing resources (dry-run friendly)
+python deployments/orchestrator.py --env production --phase discover --dry-run
+
+# Provision infrastructure
+python deployments/orchestrator.py --env staging --phase provision
+
+# Deploy application
+python deployments/orchestrator.py --env production --phase deploy
+
+# Run full pipeline
+python deployments/orchestrator.py --env production --phase all
+```
+
 ### Docker Deployment
 
 ```bash
-# 1. Build and run with Docker Compose
+# Build and run with Docker Compose
 docker-compose up -d
 
-# 2. With Cloudflare Tunnel (secure public access)
+# With Cloudflare Tunnel (secure public access)
 docker-compose --profile tunnel up -d
 
-# 3. With Monitoring (Prometheus + Grafana)
+# With Monitoring (Prometheus + Grafana)
 docker-compose --profile monitoring up -d
 ```
 
-### MCP Server Deployment
+---
+
+## Configuration Management
+
+DevPlane uses a **Pydantic Settings**-based configuration system (`devplane/core/config.py`).
+
+### Configuration Sources (Priority Order)
+
+1. **Environment Variables** (highest priority)
+2. **Environment-specific YAML files** (`config/environments/`)
+3. **Default values** in Pydantic models
+
+### Environment Configuration Files
+
+| File | Environment |
+|------|-------------|
+| `config/environments/dev.yaml` | Development |
+| `config/environments/staging.yaml` | Staging |
+| `config/environments/production.yaml` | Production |
+
+### Required Environment Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `ENV` | Runtime environment | `production` |
+| `DEPLOYMENT_DOMAIN` | Primary domain | `yourdomain.com` |
+| `DEPLOYMENT_MODE` | Deployment mode | `local`, `remote`, `docker` |
+| `SECRET_KEY` | Session signing key | (auto-generated if not set) |
+| `DATABASE_URL` | Database connection | `sqlite+aiosqlite:///./devplane.db` |
+
+### AI Provider API Keys
+
+| Service | Purpose | Get Key At |
+|---------|---------|------------|
+| DeepSeek | Free AI inference | https://platform.deepseek.com |
+| Groq | Fast inference | https://console.groq.com |
+| Gemini | Free Google AI | https://aistudio.google.com |
+| OpenRouter | Multi-model access | https://openrouter.ai |
+| DigitalOcean | VM provisioning | https://cloud.digitalocean.com |
+| Cloudflare | DNS & tunnels | https://dash.cloudflare.com |
+
+---
+
+## Deployment Phases
+
+The orchestrator supports the following phases:
+
+1. **discover** - Check existing resources (Cloudflare tunnels, DNS records, droplets). Dry-run friendly.
+2. **provision** - Create missing infrastructure (droplets, tunnels, DNS records).
+3. **configure** - Generate environment-specific configuration files (`.env.deploy`, `docker-compose.prod.yml`).
+4. **deploy** - Deploy application (local Docker Compose or remote droplet).
+5. **verify** - Health checks and smoke tests.
+6. **rollback** - Rollback to previous deployment snapshot.
+
+### Examples
+
+```bash
+# Development (Local)
+export ENV=development
+python deployments/orchestrator.py --env development --phase discover --dry-run
+python deployments/orchestrator.py --env development --phase deploy
+
+# Staging (Remote)
+export ENV=staging
+export DEPLOYMENT_DOMAIN=staging.yourdomain.com
+export DIGITALOCEAN_TOKEN=...
+export CLOUDFLARE_API_TOKEN=...
+python deployments/orchestrator.py --env staging --phase all
+
+# Production (Full Pipeline)
+python deployments/orchestrator.py --env production --phase discover --dry-run
+python deployments/orchestrator.py --env production --phase provision
+python deployments/orchestrator.py --env production --phase configure
+python deployments/orchestrator.py --env production --phase deploy
+python deployments/orchestrator.py --env production --phase verify
+```
+
+---
+
+## MCP Server Deployment
 
 To run DevPlane's Model Context Protocol (MCP) server for local IDE integrations (Antigravity, Kilo Code, Continue.dev):
 
@@ -47,7 +148,9 @@ pm2 start mcp_server_devplane.py --name "devplane-mcp"
 
 If you are running the Mothership DevPlane on a remote Droplet or Fly.io, you can use **SSH port forwarding** or point your IDE extensions to the remote tunnel if the extension supports remote MCP servers.
 
-### Fly.io Deployment
+---
+
+## Fly.io Deployment
 
 ```bash
 # 1. Install flyctl and login
@@ -60,33 +163,24 @@ fly volumes create devplane_data --size 3
 
 # 3. Set secrets
 fly secrets set DIGITALOCEAN_TOKEN=...
-fly secrets set CLOUDFLARE_API_KEY=...
+fly secrets set CLOUDFLARE_API_TOKEN=...
 # ... set other secrets from .env
 
 # 4. Deploy
 fly deploy
 ```
 
-## Environment Configuration
+---
 
-### Required API Keys
-
-| Service | Purpose | Get Key At |
-|---------|---------|------------|
-| DeepSeek | Free AI inference | https://platform.deepseek.com |
-| Groq | Fast inference | https://console.groq.com |
-| Gemini | Free Google AI | https://aistudio.google.com |
-| OpenRouter | Multi-model access | https://openrouter.ai |
-| DigitalOcean | VM provisioning | https://cloud.digitalocean.com |
-| Cloudflare | DNS & tunnels | https://dash.cloudflare.com |
-
-### Security Best Practices
+## Security Best Practices
 
 1. **Use Cloudflare Tunnel** for secure access without opening ports
-2. **Enable rate limiting** (configured in security.py)
+2. **Enable rate limiting** (configured in `devplane/security.py`)
 3. **Use strong secrets** (generate with `openssl rand -hex 32`)
-4. **Regular backups** of devplane.db
+4. **Regular backups** of `devplane.db`
 5. **Monitor audit logs** via `/api/health/detailed`
+
+---
 
 ## Monitoring
 
@@ -104,33 +198,18 @@ Configure alerts in Prometheus for:
 - High latency (>2s p95)
 - Budget thresholds (80% of monthly limit)
 
-## Troubleshooting
+---
 
-### Common Issues
+## Legacy Deployment Scripts (Deprecated)
 
-1. **MCP Connection Errors**: These are non-critical. The system works without MCP.
-2. **Slack Not Connected**: Check SLACK_BOT_TOKEN and SLACK_APP_TOKEN format.
-3. **Database Locked**: Ensure single SQLite access or use PostgreSQL.
+The following scripts have been moved to `deployments/legacy/` and are deprecated:
 
-### Logs
+- `deployments/legacy/deploy.py` - Old deployment script
+- `deployments/legacy/provision-and-deploy.py` - Old provisioning script
+- `deployments/legacy/deploy-glondor.sh` - Old Glondor deployment script
+- `deployments/legacy/deploy-glondor-prod.sh` - Old production deployment script
 
-```bash
-# Docker logs
-docker-compose logs -f devplane
-
-# Fly.io logs
-fly logs
-```
-
-## Production Checklist
-
-- [ ] All API keys configured in environment
-- [ ] Database persistence configured
-- [ ] Cloudflare Tunnel or SSL configured
-- [ ] Monitoring enabled
-- [ ] Backups scheduled
-- [ ] Rate limiting tested
-- [ ] Health checks passing
+The root `deploy.py` script is now a wrapper that calls the orchestrator, maintaining backward compatibility with the previous CLI interface.
 
 ---
 
@@ -229,5 +308,59 @@ If you want to use the MCP server from a remote Droplet (e.g., Gate Droplet), yo
 - **SSH Timeout**: Ensure the droplet has finished provisioning (wait 60s).
 - **UFW Rules Not Applied**: Verify that the `create_firewalled_sandbox` function completed successfully.
 - **Sandbox Not Destroyed**: Check the `destroy_sandbox` function for errors; manual cleanup may be required via the DigitalOcean API.
+
+---
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Missing environment variables** – The orchestrator validates required variables for each environment. Run `python deployments/orchestrator.py --env production --phase discover --dry-run` to see missing variables.
+
+2. **Cloudflare tunnel creation fails** – Ensure `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `CLOUDFLARE_ZONE_ID` are set correctly.
+
+3. **DigitalOcean droplet creation fails** – Check `DIGITALOCEAN_TOKEN` and ensure SSH key is configured.
+
+4. **Timeout errors** – Increase timeout settings in `devplane/core/config.py` (`SSH_CONNECT_TIMEOUT`, `APT_TIMEOUT`, etc.).
+
+5. **MCP Connection Errors**: These are non-critical. The system works without MCP.
+6. **Slack Not Connected**: Check SLACK_BOT_TOKEN and SLACK_APP_TOKEN format.
+7. **Database Locked**: Ensure single SQLite access or use PostgreSQL.
+
+### Logs
+
+```bash
+# Docker logs
+docker-compose logs -f devplane
+
+# Fly.io logs
+fly logs
+
+# Verbose orchestrator output
+python deployments/orchestrator.py --env production --phase deploy --verbose
+```
+
+---
+
+## Production Checklist
+
+- [ ] All API keys configured in environment
+- [ ] Database persistence configured
+- [ ] Cloudflare Tunnel or SSL configured
+- [ ] Monitoring enabled
+- [ ] Backups scheduled
+- [ ] Rate limiting tested
+- [ ] Health checks passing
+- [ ] Configuration validated with `--dry-run`
+
+---
+
+## References
+
+- [`deployments/DEPLOYMENT_GUIDE.md`](deployments/DEPLOYMENT_GUIDE.md) - Detailed deployment pipeline documentation
+- [`USER_GUIDE.md`](USER_GUIDE.md) - Complete user guide
+- [`AGENTS.md`](AGENTS.md) - Terminal hang prevention patterns
+- [`devplane/core/config.py`](devplane/core/config.py) - Configuration system source
+- [`devplane/secrets/vault.py`](devplane/secrets/vault.py) - Bitwarden Vault integration
 
 For more details, see `USER_GUIDE.md` and `devplane/infra/sandbox.py`.
