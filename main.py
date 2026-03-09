@@ -51,6 +51,8 @@ async def lifespan(app: FastAPI):
     from devplane.security import init_audit_tables
     from devplane.auth import init_auth
 
+    # Ensure .env file has secure permissions
+    secure_env_file(".env")
     # Initialize database
     await init_db()
     await init_audit_tables()

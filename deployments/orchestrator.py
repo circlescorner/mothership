@@ -86,6 +86,8 @@ async def run_ssh_command(
     Uses the exact flags mandated by AGENTS.md.
     """
     # Determine strict host key checking setting
+    # Default is "no" to prevent terminal hangs per AGENTS.md.
+    # Values "yes", "true", "1" enable strict checking; all others default to disabled.
     if strict_host_key_checking is None:
         env_value = os.environ.get("SSH_STRICT_HOST_KEY_CHECKING", "no").lower()
         strict_host_key_checking = env_value in ("yes", "true", "1")
